@@ -1,11 +1,12 @@
 import React from 'react';
 import { User } from 'firebase/auth';
-import { Building2, History, LogOut, Plus } from 'lucide-react';
+import { Building2, History, KeyRound, LogOut, Plus } from 'lucide-react';
 
 interface SchoolOnboardingProps {
   user: User;
   onOpenAddSchool: () => void;
   onOpenRestoreSchool: () => void;
+  onOpenJoinByCode: () => void;
   onLogout: () => void;
 }
 
@@ -13,6 +14,7 @@ export const SchoolOnboarding: React.FC<SchoolOnboardingProps> = ({
   user,
   onOpenAddSchool,
   onOpenRestoreSchool,
+  onOpenJoinByCode,
   onLogout
 }) => {
   const userName = user.displayName || user.email || 'Pengguna';
@@ -48,7 +50,7 @@ export const SchoolOnboarding: React.FC<SchoolOnboardingProps> = ({
         </div>
 
         <p className="text-xs sm:text-sm text-slate-600 leading-relaxed mb-6">
-          Akun Anda belum terhubung dengan sekolah mana pun. Daftarkan sekolah pertama Anda atau pulihkan sekolah lama yang pernah dibuat sebelumnya.
+          Akun Anda belum terhubung dengan sekolah mana pun. Daftarkan sekolah pertama Anda, bergabung dengan kode undangan tim, atau pulihkan sekolah lama.
         </p>
 
         <div className="space-y-3">
@@ -59,6 +61,15 @@ export const SchoolOnboarding: React.FC<SchoolOnboardingProps> = ({
           >
             <Plus className="w-4 h-4" />
             <span>Buat sekolah pertama</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onOpenJoinByCode}
+            className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-semibold text-sm transition-colors cursor-pointer"
+          >
+            <KeyRound className="w-4 h-4" />
+            <span>Gabung dengan kode</span>
           </button>
 
           <button

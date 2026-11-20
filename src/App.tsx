@@ -12,6 +12,7 @@ import { SchoolWorkspace, ExternalSchoolRename } from './SchoolWorkspace';
 import { AddSchoolModal } from './components/school/AddSchoolModal';
 import { ManageSchoolsModal } from './components/school/ManageSchoolsModal';
 import { RestoreSchoolModal } from './components/school/RestoreSchoolModal';
+import { JoinByCodeModal } from './components/school/JoinByCodeModal';
 import { getFriendlyRegistryErrorMessage, subscribeMySchools } from './lib/schoolRegistry';
 import { clearAllBospStorage } from './lib/schoolStorage';
 import { logoutGoogle } from './lib/firebase';
@@ -38,6 +39,7 @@ export default function App() {
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
   const [isManageModalOpen, setIsManageModalOpen] = useState<boolean>(false);
   const [isRestoreModalOpen, setIsRestoreModalOpen] = useState<boolean>(false);
+  const [isJoinModalOpen, setIsJoinModalOpen] = useState<boolean>(false);
   const [externalRename, setExternalRename] = useState<ExternalSchoolRename | null>(null);
   const [restoreBanner, setRestoreBanner] = useState<{
     type: 'success' | 'warning';
@@ -55,6 +57,7 @@ export default function App() {
       setIsAddModalOpen(false);
       setIsManageModalOpen(false);
       setIsRestoreModalOpen(false);
+      setIsJoinModalOpen(false);
       setRestoreBanner(null);
       document.title = 'Ekstraktor RKAS & BKU BOSP';
       return;
@@ -307,6 +310,7 @@ export default function App() {
           user={firebaseUser}
           onOpenAddSchool={() => setIsAddModalOpen(true)}
           onOpenRestoreSchool={() => setIsRestoreModalOpen(true)}
+          onOpenJoinByCode={() => setIsJoinModalOpen(true)}
           onLogout={() => void handleOnboardingLogout()}
         />
       ) : (
@@ -318,6 +322,7 @@ export default function App() {
           onSwitchSchool={handleSwitchSchool}
           schools={schools}
           onOpenAddSchool={() => setIsAddModalOpen(true)}
+          onOpenJoinByCode={() => setIsJoinModalOpen(true)}
           onOpenManageSchools={() => setIsManageModalOpen(true)}
           externalRename={externalRename}
         />
@@ -332,6 +337,22 @@ export default function App() {
           setPendingSchoolTimeoutError(null);
           setPendingSchool({ schoolId: newSchoolId, namaSekolah });
           handleSwitchSchool(newSchoolId);
+        }}
+      />
+
+      <JoinByCodeModal
+        isOpen={isJoinModalOpen}
+        onClose={() => setIsJoinModalOpen(false)}
+        user={firebaseUser}
+        existingSchools={schools}
+        onJoined={(joinedSchoolId, namaSekolah, joinedRole) => {
+          setPendingSchoolTimeoutError(null);
+          setPendingSchool({ schoolId: joinedSchoolId, namaSekolah });
+          handleSwitchSchool(joinedSchoolId);
+          setRestoreBanner({
+            type: 'success',
+            message: `Berhasil bergabung ke "${namaSekolah}" sebagai ${joinedRole === 'editor' ? 'Editor' : 'Viewer'}.`
+          });
         }}
       />
 

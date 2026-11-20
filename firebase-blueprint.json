@@ -40,12 +40,13 @@
       "type": "object",
       "properties": {
         "schoolId": { "type": "string" },
+        "schoolName": { "type": "string" },
         "role": { "type": "string", "enum": ["editor", "viewer"] },
         "createdBy": { "type": "string" },
         "expiresAt": { "type": "string", "format": "date-time" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["schoolId", "role", "createdBy", "expiresAt"]
+      "required": ["schoolId", "schoolName", "role", "createdBy", "expiresAt"]
     },
     "MySchool": {
       "title": "My School Summary",

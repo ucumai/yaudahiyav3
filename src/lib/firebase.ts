@@ -80,43 +80,20 @@ export const requestSilentDriveToken = async (): Promise<string | null> => {
   });
 };
 
-// Initial Auth State Listener
+// Initial Auth State Listener (hanya meneruskan token Drive yang sudah ada di memori;
+// re-koneksi Drive dilakukan lewat klik pengguna agar tidak diblokir pemblokir popup browser)
 export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
   onAuthFailure?: () => void,
-  onConnecting?: () => void
+  _onConnecting?: () => void
 ) => {
-  return onAuthStateChanged(auth, async (user: User | null) => {
-    if (user) {
-      if (cachedAccessToken) {
-        if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
-      } else if (!isSigningIn) {
-        // Cek apakah pengguna sebelumnya telah menghubungkan Google Drive
-        const hasConnected = localStorage.getItem('bosp_gdrive_has_connected') === 'true';
-        if (hasConnected) {
-          if (onConnecting) onConnecting();
-          // Coba dapatkan token secara silent tanpa popup
-          const silentToken = await requestSilentDriveToken();
-          if (silentToken && onAuthSuccess) {
-            onAuthSuccess(user, silentToken);
-            return;
-          }
-        }
-        cachedAccessToken = null;
-        if (onAuthFailure) onAuthFailure();
-      }
+  return onAuthStateChanged(auth, (user: User | null) => {
+    if (user && cachedAccessToken) {
+      if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
     } else {
-      // Pengguna Firebase belum aktif, tapi cek apakah pengguna lama
-      const hasConnected = localStorage.getItem('bosp_gdrive_has_connected') === 'true';
-      if (hasConnected && !isSigningIn) {
-        if (onConnecting) onConnecting();
-        const silentToken = await requestSilentDriveToken();
-        if (silentToken && auth.currentUser && onAuthSuccess) {
-          onAuthSuccess(auth.currentUser, silentToken);
-          return;
-        }
+      if (!user) {
+        cachedAccessToken = null;
       }
-      cachedAccessToken = null;
       if (onAuthFailure) onAuthFailure();
     }
   });

@@ -48,13 +48,14 @@ service cloud.firestore {
                       && request.resource.data.role == 'owner'
                       && getAfter(schoolDoc(schoolId)).data.ownerUid == request.auth.uid
                       && (!exists(schoolDoc(schoolId)) || !('ownerUid' in get(schoolDoc(schoolId)).data));
-        // (b) bergabung lewat kode undangan (Prompt 5, opsional)
+        // (b) bergabung lewat kode undangan sekali pakai (hapus invites/{code} dalam batch yang sama)
         allow create: if signedIn() && request.auth.uid == uid
                       && request.resource.data.role in ['editor', 'viewer']
                       && request.resource.data.inviteCode is string
                       && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode)).data.schoolId == schoolId
                       && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode)).data.role == request.resource.data.role
-                      && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode)).data.expiresAt > request.time;
+                      && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode)).data.expiresAt > request.time
+                      && !existsAfter(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode));
         // owner mengubah peran / mengeluarkan anggota lain; anggota boleh keluar sendiri (kecuali owner)
         allow update: if isOwner(schoolId) && uid != request.auth.uid && request.resource.data.role in ['editor', 'viewer'];
         allow delete: if (isOwner(schoolId) && uid != request.auth.uid)
@@ -62,14 +63,18 @@ service cloud.firestore {
       }
     }
 
-    // Kode undangan (opsional, Prompt 5). Get untuk penerima undangan; list hanya untuk pembuat undangan miliknya.
+    // Kode undangan sekali pakai. Get untuk penerima undangan; list hanya untuk pembuat undangan miliknya.
     match /invites/{code} {
       allow get: if signedIn();
       allow list: if signedIn() && resource.data.createdBy == request.auth.uid;
       allow create: if signedIn() && isOwner(request.resource.data.schoolId)
                     && request.resource.data.createdBy == request.auth.uid
                     && request.resource.data.role in ['editor', 'viewer'];
-      allow delete: if signedIn() && resource.data.createdBy == request.auth.uid;
+      allow delete: if signedIn() && (
+        resource.data.createdBy == request.auth.uid
+        || (existsAfter(memberDoc(resource.data.schoolId, request.auth.uid))
+            && getAfter(memberDoc(resource.data.schoolId, request.auth.uid)).data.inviteCode == code)
+      );
     }
 
     // Semua koleksi data modul: ID dokumen = schoolId

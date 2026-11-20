@@ -1,22 +1,34 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { User } from 'firebase/auth';
 import {
   AlertCircle,
   AlertTriangle,
   Building2,
   Check,
+  Copy,
   Edit3,
   History,
+  KeyRound,
   Loader2,
   LogOut,
+  Plus,
   Trash2,
+  UserMinus,
+  Users,
   X
 } from 'lucide-react';
-import { SchoolSummary } from '../../types';
+import { SchoolInvite, SchoolMember, SchoolSummary } from '../../types';
 import {
+  createSchoolInvite,
   getFriendlyRegistryErrorMessage,
   removeSchoolFromMyList,
-  updateSchoolBasicInfo
+  removeSchoolMember,
+  revokeInviteCode,
+  subscribeMyInvites,
+  subscribeSchoolMembers,
+  toMillisSafe,
+  updateSchoolBasicInfo,
+  updateSchoolMemberRole
 } from '../../lib/schoolRegistry';
 import {
   clearLegacyBackupKeys,
@@ -37,6 +49,28 @@ interface ManageSchoolsModalProps {
   onOpenRestoreSchool?: () => void;
 }
 
+function formatDateId(val: any): string {
+  const ms = toMillisSafe(val);
+  if (!ms) return '-';
+  return new Date(ms).toLocaleDateString('id-ID', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
+  });
+}
+
+function formatDateTimeId(val: any): string {
+  const ms = toMillisSafe(val);
+  if (!ms) return '-';
+  return new Date(ms).toLocaleDateString('id-ID', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
 export const ManageSchoolsModal: React.FC<ManageSchoolsModalProps> = ({
   isOpen,
   onClose,
@@ -47,6 +81,15 @@ export const ManageSchoolsModal: React.FC<ManageSchoolsModalProps> = ({
   onRemoved,
   onOpenRestoreSchool
 }) => {
+  const ownedSchools = useMemo(
+    () => schools.filter((s) => s.role === 'owner'),
+    [schools]
+  );
+
+  const [modalTab, setModalTab] = useState<'schools' | 'members'>('schools');
+  const [selectedOwnerSchoolId, setSelectedOwnerSchoolId] = useState<string>('');
+
+  // Tab 1: Daftar Sekolah state
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editNpsn, setEditNpsn] = useState('');
@@ -57,8 +100,24 @@ export const ManageSchoolsModal: React.FC<ManageSchoolsModalProps> = ({
   const [isConfirmingClearBackup, setIsConfirmingClearBackup] = useState<boolean>(false);
   const [backupClearedMessage, setBackupClearedMessage] = useState<string | null>(null);
 
+  // Tab 2: Anggota & Kode Undangan state
+  const [members, setMembers] = useState<SchoolMember[]>([]);
+  const [membersLoading, setMembersLoading] = useState<boolean>(false);
+  const [membersError, setMembersError] = useState<string | null>(null);
+  const [memberBusyUid, setMemberBusyUid] = useState<string | null>(null);
+  const [confirmKickUid, setConfirmKickUid] = useState<string | null>(null);
+
+  const [inviteRole, setInviteRole] = useState<'editor' | 'viewer'>('editor');
+  const [isCreatingInvite, setIsCreatingInvite] = useState<boolean>(false);
+  const [latestInvite, setLatestInvite] = useState<SchoolInvite | null>(null);
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const [myInvites, setMyInvites] = useState<SchoolInvite[]>([]);
+  const [invitesError, setInvitesError] = useState<string | null>(null);
+  const [revokingCode, setRevokingCode] = useState<string | null>(null);
+
   useEffect(() => {
     if (isOpen) {
+      setModalTab('schools');
       setEditingId(null);
       setConfirmRemoveId(null);
       setBusyId(null);
@@ -66,8 +125,91 @@ export const ManageSchoolsModal: React.FC<ManageSchoolsModalProps> = ({
       setIsConfirmingClearBackup(false);
       setBackupClearedMessage(null);
       setLegacyBackupCount(countLegacyBackupKeys());
+      setMembersError(null);
+      setInvitesError(null);
+      setLatestInvite(null);
+      setCopiedCode(null);
+      setConfirmKickUid(null);
+      setInviteRole('editor');
+
+      const activeIsOwned = ownedSchools.some((s) => s.schoolId === activeSchoolId);
+      setSelectedOwnerSchoolId(
+        activeIsOwned && activeSchoolId
+          ? activeSchoolId
+          : ownedSchools[0]?.schoolId || ''
+      );
     }
-  }, [isOpen]);
+  }, [isOpen, activeSchoolId, ownedSchools]);
+
+  // Pastikan selectedOwnerSchoolId tetap valid jika daftar sekolah berubah
+  useEffect(() => {
+    if (ownedSchools.length === 0) {
+      setModalTab('schools');
+      setSelectedOwnerSchoolId('');
+      return;
+    }
+    if (!ownedSchools.some((s) => s.schoolId === selectedOwnerSchoolId)) {
+      const activeIsOwned = ownedSchools.some((s) => s.schoolId === activeSchoolId);
+      setSelectedOwnerSchoolId(
+        activeIsOwned && activeSchoolId ? activeSchoolId : ownedSchools[0].schoolId
+      );
+    }
+  }, [ownedSchools, selectedOwnerSchoolId, activeSchoolId]);
+
+  // Subscribe daftar anggota sekolah terpilih & daftar undangan milik user saat tab Anggota dibuka
+  useEffect(() => {
+    if (!isOpen || modalTab !== 'members' || !selectedOwnerSchoolId) return;
+
+    setMembersLoading(true);
+    setMembersError(null);
+    setConfirmKickUid(null);
+
+    const unsubMembers = subscribeSchoolMembers(
+      selectedOwnerSchoolId,
+      (list) => {
+        setMembers(list);
+        setMembersLoading(false);
+      },
+      (err) => {
+        setMembersError(
+          getFriendlyRegistryErrorMessage(err, 'Gagal memuat daftar anggota sekolah.')
+        );
+        setMembersLoading(false);
+      }
+    );
+
+    const unsubInvites = subscribeMyInvites(
+      user.uid,
+      (list) => {
+        setMyInvites(list);
+        setInvitesError(null);
+      },
+      (err) => {
+        setInvitesError(
+          getFriendlyRegistryErrorMessage(err, 'Gagal memuat daftar kode undangan aktif.')
+        );
+      }
+    );
+
+    return () => {
+      unsubMembers();
+      unsubInvites();
+    };
+  }, [isOpen, modalTab, selectedOwnerSchoolId, user.uid]);
+
+  const selectedOwnerSchool = useMemo(
+    () => ownedSchools.find((s) => s.schoolId === selectedOwnerSchoolId) || null,
+    [ownedSchools, selectedOwnerSchoolId]
+  );
+
+  const activeInvitesForSchool = useMemo(() => {
+    const now = Date.now();
+    return myInvites.filter(
+      (inv) =>
+        inv.schoolId === selectedOwnerSchoolId &&
+        toMillisSafe(inv.expiresAt) > now
+    );
+  }, [myInvites, selectedOwnerSchoolId]);
 
   if (!isOpen) return null;
 
@@ -107,7 +249,6 @@ export const ManageSchoolsModal: React.FC<ManageSchoolsModalProps> = ({
         npsn: cleanNpsn
       });
 
-      // Segarkan cache lokal metadata sekolah tersebut jika tersimpan
       const cachedMeta = readLS<Record<string, any> | null>(school.schoolId, 'school_metadata', null);
       if (cachedMeta && typeof cachedMeta === 'object') {
         writeLS(school.schoolId, 'school_metadata', {
@@ -148,6 +289,89 @@ export const ManageSchoolsModal: React.FC<ManageSchoolsModalProps> = ({
     }
   };
 
+  const handleRoleChange = async (member: SchoolMember, newRole: 'editor' | 'viewer') => {
+    if (!selectedOwnerSchoolId || member.uid === user.uid || member.role === newRole || memberBusyUid) {
+      return;
+    }
+    setMemberBusyUid(member.uid);
+    setMembersError(null);
+    try {
+      await updateSchoolMemberRole(selectedOwnerSchoolId, member.uid, newRole);
+    } catch (err) {
+      setMembersError(
+        getFriendlyRegistryErrorMessage(err, 'Gagal mengubah peran anggota.')
+      );
+    } finally {
+      setMemberBusyUid(null);
+    }
+  };
+
+  const handleKickMember = async (member: SchoolMember) => {
+    if (!selectedOwnerSchoolId || member.uid === user.uid || memberBusyUid) return;
+    setMemberBusyUid(member.uid);
+    setMembersError(null);
+    try {
+      await removeSchoolMember(selectedOwnerSchoolId, member.uid);
+      setConfirmKickUid(null);
+    } catch (err) {
+      setMembersError(
+        getFriendlyRegistryErrorMessage(err, 'Gagal mengeluarkan anggota dari sekolah.')
+      );
+    } finally {
+      setMemberBusyUid(null);
+    }
+  };
+
+  const handleCreateInvite = async () => {
+    if (!selectedOwnerSchool || isCreatingInvite) return;
+    setIsCreatingInvite(true);
+    setInvitesError(null);
+    try {
+      const created = await createSchoolInvite(user, {
+        schoolId: selectedOwnerSchool.schoolId,
+        schoolName: selectedOwnerSchool.namaSekolah || 'Sekolah',
+        role: inviteRole
+      });
+      setLatestInvite(created);
+    } catch (err) {
+      setInvitesError(
+        getFriendlyRegistryErrorMessage(err, 'Gagal membuat kode undangan baru.')
+      );
+    } finally {
+      setIsCreatingInvite(false);
+    }
+  };
+
+  const handleCopyCode = async (code: string) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopiedCode(code);
+      setTimeout(() => {
+        setCopiedCode((prev) => (prev === code ? null : prev));
+      }, 2500);
+    } catch {
+      // ignore clipboard errors
+    }
+  };
+
+  const handleRevokeInvite = async (code: string) => {
+    if (revokingCode) return;
+    setRevokingCode(code);
+    setInvitesError(null);
+    try {
+      await revokeInviteCode(code);
+      if (latestInvite?.code === code) {
+        setLatestInvite(null);
+      }
+    } catch (err) {
+      setInvitesError(
+        getFriendlyRegistryErrorMessage(err, 'Gagal mencabut kode undangan.')
+      );
+    } finally {
+      setRevokingCode(null);
+    }
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4"
@@ -155,18 +379,24 @@ export const ManageSchoolsModal: React.FC<ManageSchoolsModalProps> = ({
       aria-modal="true"
       aria-labelledby="manage-schools-modal-title"
     >
-      <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[85vh]">
+      <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[88vh]">
         <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50 shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 text-emerald-600 flex items-center justify-center">
-              <Building2 className="w-5 h-5" />
+              {modalTab === 'members' ? (
+                <Users className="w-5 h-5" />
+              ) : (
+                <Building2 className="w-5 h-5" />
+              )}
             </div>
             <div>
               <h2 id="manage-schools-modal-title" className="text-base font-bold text-slate-900">
-                Kelola Daftar Sekolah Saya
+                Kelola Sekolah &amp; Tim
               </h2>
               <p className="text-xs text-slate-500">
-                Ubah nama/NPSN (khusus Owner &amp; Editor) atau keluarkan dari daftar pribadi Anda
+                {modalTab === 'members'
+                  ? 'Kelola anggota dan kode undangan sekali pakai (khusus Owner)'
+                  : 'Ubah nama/NPSN (Owner & Editor) atau keluarkan dari daftar pribadi Anda'}
               </p>
             </div>
           </div>
@@ -180,244 +410,622 @@ export const ManageSchoolsModal: React.FC<ManageSchoolsModalProps> = ({
           </button>
         </div>
 
-        <div className="p-5 overflow-y-auto space-y-4">
-          {errorMessage && (
-            <div
-              role="alert"
-              className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs text-rose-800"
+        {ownedSchools.length > 0 && (
+          <div className="px-6 pt-3 pb-0 border-b border-slate-200 bg-white flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setModalTab('schools')}
+              className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold border-b-2 transition-colors cursor-pointer ${
+                modalTab === 'schools'
+                  ? 'border-emerald-600 text-emerald-700'
+                  : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
             >
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-              <span>{errorMessage}</span>
-            </div>
+              <Building2 className="w-3.5 h-3.5" />
+              <span>Daftar Sekolah ({schools.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setModalTab('members')}
+              className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold border-b-2 transition-colors cursor-pointer ${
+                modalTab === 'members'
+                  ? 'border-emerald-600 text-emerald-700'
+                  : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span>Anggota</span>
+            </button>
+          </div>
+        )}
+
+        <div className="p-5 overflow-y-auto space-y-4">
+          {modalTab === 'schools' && (
+            <>
+              {errorMessage && (
+                <div
+                  role="alert"
+                  className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs text-rose-800"
+                >
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <span>{errorMessage}</span>
+                </div>
+              )}
+
+              {schools.length === 0 ? (
+                <div className="py-10 text-center text-sm text-slate-500">
+                  Belum ada sekolah dalam daftar Anda.
+                </div>
+              ) : (
+                <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-200">
+                  {schools.map((school) => {
+                    const isActive = school.schoolId === activeSchoolId;
+                    const isEditing = editingId === school.schoolId;
+                    const isConfirmingRemove = confirmRemoveId === school.schoolId;
+                    const isBusy = busyId === school.schoolId;
+                    const canEdit = school.role === 'owner' || school.role === 'editor';
+
+                    return (
+                      <div
+                        key={school.schoolId}
+                        className={`p-4 transition-colors ${isActive ? 'bg-emerald-50/40' : 'bg-white'}`}
+                      >
+                        {isEditing ? (
+                          <div className="space-y-3">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                              <div className="sm:col-span-2">
+                                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                  Nama Sekolah
+                                </label>
+                                <input
+                                  type="text"
+                                  value={editName}
+                                  onChange={(e) => setEditName(e.target.value)}
+                                  disabled={isBusy}
+                                  className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                  NPSN (8 digit)
+                                </label>
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  maxLength={8}
+                                  value={editNpsn}
+                                  onChange={(e) => setEditNpsn(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                                  disabled={isBusy}
+                                  className="w-full px-3 py-2 text-sm font-mono bg-slate-50 border border-slate-300 rounded-lg text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                />
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={cancelEdit}
+                                className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50"
+                              >
+                                Batal
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() => void handleSaveEdit(school)}
+                                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold cursor-pointer disabled:opacity-60"
+                              >
+                                {isBusy ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <Check className="w-3.5 h-3.5" />
+                                )}
+                                <span>Simpan</span>
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <span
+                                className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${getSchoolAvatarColor(
+                                  school.schoolId
+                                )}`}
+                              >
+                                {getSchoolInitials(school.namaSekolah)}
+                              </span>
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-sm font-bold text-slate-900 truncate">
+                                    {school.namaSekolah || 'Tanpa Nama'}
+                                  </span>
+                                  {isActive && (
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                      Aktif
+                                    </span>
+                                  )}
+                                  <span
+                                    className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                                      school.role === 'owner'
+                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                        : school.role === 'editor'
+                                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                        : 'bg-amber-50 text-amber-700 border-amber-200'
+                                    }`}
+                                  >
+                                    {getRoleLabel(school.role)}
+                                  </span>
+                                </div>
+                                <div className="text-xs text-slate-500 font-mono mt-0.5">
+                                  NPSN: {school.npsn || '-'}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-2 shrink-0">
+                              <button
+                                type="button"
+                                disabled={!canEdit || isBusy}
+                                onClick={() => startEdit(school)}
+                                title={
+                                  canEdit
+                                    ? 'Ubah nama sekolah atau NPSN'
+                                    : 'Peran Viewer tidak dapat mengubah nama atau NPSN'
+                                }
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                                <span>Ubah</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() => {
+                                  setErrorMessage(null);
+                                  setEditingId(null);
+                                  setConfirmRemoveId(
+                                    isConfirmingRemove ? null : school.schoolId
+                                  );
+                                }}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                              >
+                                <LogOut className="w-3.5 h-3.5" />
+                                <span>Keluarkan dari daftar saya</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {isConfirmingRemove && (
+                          <div className="mt-3 p-3 rounded-xl bg-amber-50 border border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div className="flex items-start gap-2 text-xs text-amber-900">
+                              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                              <span>
+                                Keluarkan <strong>{school.namaSekolah}</strong> dari daftar Anda? Data sekolah di cloud <strong>tidak akan dihapus</strong>.
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0 justify-end">
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() => setConfirmRemoveId(null)}
+                                className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer disabled:opacity-50"
+                              >
+                                Batal
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() => void handleConfirmRemove(school)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold cursor-pointer disabled:opacity-60"
+                              >
+                                {isBusy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                                <span>Ya, Keluarkan</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {backupClearedMessage && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-xs text-emerald-800 flex items-center gap-2">
+                  <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{backupClearedMessage}</span>
+                </div>
+              )}
+
+              {isConfirmingClearBackup && (
+                <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-start gap-2 text-xs text-amber-900">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <span>
+                      Hapus <strong>{legacyBackupCount}</strong> kunci cadangan lokal lama (<code>bosp_legacy_backup_*</code>) dari browser ini? Pastikan data sekolah yang dipulihkan sudah tampil lengkap terlebih dahulu.
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0 justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setIsConfirmingClearBackup(false)}
+                      className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const removed = clearLegacyBackupKeys();
+                        setLegacyBackupCount(0);
+                        setIsConfirmingClearBackup(false);
+                        setBackupClearedMessage(`${removed} kunci cadangan lokal lama telah dihapus dari browser.`);
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold cursor-pointer"
+                    >
+                      Ya, Hapus Cadangan
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                Catatan: Mengeluarkan sekolah hanya menghapus entri dari daftar pribadi Anda. Dokumen dan riwayat sekolah di cloud tetap tersimpan utuh.
+              </p>
+            </>
           )}
 
-          {schools.length === 0 ? (
-            <div className="py-10 text-center text-sm text-slate-500">
-              Belum ada sekolah dalam daftar Anda.
-            </div>
-          ) : (
-            <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-200">
-              {schools.map((school) => {
-                const isActive = school.schoolId === activeSchoolId;
-                const isEditing = editingId === school.schoolId;
-                const isConfirmingRemove = confirmRemoveId === school.schoolId;
-                const isBusy = busyId === school.schoolId;
-                const canEdit = school.role === 'owner' || school.role === 'editor';
-
-                return (
-                  <div
-                    key={school.schoolId}
-                    className={`p-4 transition-colors ${isActive ? 'bg-emerald-50/40' : 'bg-white'}`}
+          {modalTab === 'members' && selectedOwnerSchool && (
+            <div className="space-y-5">
+              {/* Pemilih Sekolah (jika Owner memiliki lebih dari 1 sekolah) */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span
+                    className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 ${getSchoolAvatarColor(
+                      selectedOwnerSchool.schoolId
+                    )}`}
                   >
-                    {isEditing ? (
-                      <div className="space-y-3">
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                          <div className="sm:col-span-2">
-                            <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                              Nama Sekolah
-                            </label>
-                            <input
-                              type="text"
-                              value={editName}
-                              onChange={(e) => setEditName(e.target.value)}
-                              disabled={isBusy}
-                              className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                              NPSN (8 digit)
-                            </label>
-                            <input
-                              type="text"
-                              inputMode="numeric"
-                              maxLength={8}
-                              value={editNpsn}
-                              onChange={(e) => setEditNpsn(e.target.value.replace(/\D/g, '').slice(0, 8))}
-                              disabled={isBusy}
-                              className="w-full px-3 py-2 text-sm font-mono bg-slate-50 border border-slate-300 rounded-lg text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                            />
-                          </div>
-                        </div>
-                        <div className="flex items-center justify-end gap-2">
-                          <button
-                            type="button"
-                            disabled={isBusy}
-                            onClick={cancelEdit}
-                            className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50"
-                          >
-                            Batal
-                          </button>
-                          <button
-                            type="button"
-                            disabled={isBusy}
-                            onClick={() => void handleSaveEdit(school)}
-                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold cursor-pointer disabled:opacity-60"
-                          >
-                            {isBusy ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            ) : (
-                              <Check className="w-3.5 h-3.5" />
-                            )}
-                            <span>Simpan</span>
-                          </button>
-                        </div>
+                    {getSchoolInitials(selectedOwnerSchool.namaSekolah)}
+                  </span>
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-slate-900 truncate">
+                      {selectedOwnerSchool.namaSekolah}
+                    </div>
+                    <div className="text-[11px] text-slate-500 font-mono">
+                      NPSN: {selectedOwnerSchool.npsn || '-'}
+                    </div>
+                  </div>
+                </div>
+
+                {ownedSchools.length > 1 && (
+                  <select
+                    value={selectedOwnerSchoolId}
+                    onChange={(e) => {
+                      setSelectedOwnerSchoolId(e.target.value);
+                      setLatestInvite(null);
+                    }}
+                    aria-label="Pilih sekolah yang dikelola"
+                    className="px-3 py-1.5 text-xs font-semibold bg-white border border-slate-300 rounded-lg text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-none cursor-pointer"
+                  >
+                    {ownedSchools.map((s) => (
+                      <option key={s.schoolId} value={s.schoolId}>
+                        {s.namaSekolah} ({s.npsn || '-'})
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {/* Bagian 1: Buat Kode Undangan */}
+              <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+                <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <KeyRound className="w-4 h-4 text-emerald-600" />
+                    <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wide">
+                      Buat Kode Undangan
+                    </h3>
+                  </div>
+                  <span className="text-[11px] text-slate-500">
+                    Sekali pakai &bull; Berlaku 7 hari
+                  </span>
+                </div>
+
+                <div className="p-4 space-y-3">
+                  {invitesError && (
+                    <div
+                      role="alert"
+                      className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800"
+                    >
+                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                      <span>{invitesError}</span>
+                    </div>
+                  )}
+
+                  <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+                    <div className="flex-1">
+                      <label
+                        htmlFor="invite-role-select"
+                        className="block text-[11px] font-semibold text-slate-600 mb-1"
+                      >
+                        Peran Anggota Baru
+                      </label>
+                      <select
+                        id="invite-role-select"
+                        value={inviteRole}
+                        onChange={(e) => setInviteRole(e.target.value as 'editor' | 'viewer')}
+                        disabled={isCreatingInvite}
+                        className="w-full px-3 py-2 text-xs font-semibold bg-slate-50 border border-slate-300 rounded-lg text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none cursor-pointer"
+                      >
+                        <option value="editor">Editor (Dapat melihat &amp; mengubah data)</option>
+                        <option value="viewer">Viewer (Hanya lihat &amp; cetak)</option>
+                      </select>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={isCreatingInvite}
+                      onClick={() => void handleCreateInvite()}
+                      className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer disabled:opacity-60 shrink-0"
+                    >
+                      {isCreatingInvite ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Plus className="w-3.5 h-3.5" />
+                      )}
+                      <span>Buat Kode Undangan</span>
+                    </button>
+                  </div>
+
+                  {latestInvite && latestInvite.schoolId === selectedOwnerSchoolId && (
+                    <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50/70 p-4 text-center space-y-2.5">
+                      <div className="text-[11px] font-semibold text-emerald-800">
+                        Kode Undangan ({getRoleLabel(latestInvite.role)}) Berhasil Dibuat
                       </div>
+                      <div className="text-2xl sm:text-3xl font-mono font-extrabold tracking-[0.22em] text-slate-900 select-all py-1">
+                        {latestInvite.code}
+                      </div>
+                      <div className="flex flex-wrap items-center justify-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => void handleCopyCode(latestInvite.code)}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition-colors cursor-pointer"
+                        >
+                          {copiedCode === latestInvite.code ? (
+                            <>
+                              <Check className="w-3.5 h-3.5 text-emerald-400" />
+                              <span>Tersalin!</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3.5 h-3.5" />
+                              <span>Salin Kode</span>
+                            </>
+                          )}
+                        </button>
+                        <span className="text-[11px] text-slate-600">
+                          Berlaku s.d. {formatDateTimeId(latestInvite.expiresAt)}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Daftar Kode Aktif Milik Saya */}
+                  <div className="pt-2 border-t border-slate-100 space-y-2">
+                    <div className="text-[11px] font-bold text-slate-600">
+                      Kode Undangan Aktif ({activeInvitesForSchool.length})
+                    </div>
+                    {activeInvitesForSchool.length === 0 ? (
+                      <p className="text-xs text-slate-400 italic">
+                        Belum ada kode undangan aktif untuk sekolah ini.
+                      </p>
                     ) : (
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <span
-                            className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${getSchoolAvatarColor(
-                              school.schoolId
-                            )}`}
+                      <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden">
+                        {activeInvitesForSchool.map((inv) => (
+                          <div
+                            key={inv.code}
+                            className="px-3 py-2.5 bg-white flex flex-wrap items-center justify-between gap-2"
                           >
-                            {getSchoolInitials(school.namaSekolah)}
-                          </span>
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-sm font-bold text-slate-900 truncate">
-                                {school.namaSekolah || 'Tanpa Nama'}
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span className="font-mono font-bold text-sm tracking-wider text-slate-900 bg-slate-100 px-2.5 py-1 rounded border border-slate-200">
+                                {inv.code}
                               </span>
-                              {isActive && (
-                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                  Aktif
-                                </span>
-                              )}
-                              <span
-                                className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
-                                  school.role === 'owner'
-                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                    : school.role === 'editor'
-                                    ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                                    : 'bg-amber-50 text-amber-700 border-amber-200'
-                                }`}
-                              >
-                                {getRoleLabel(school.role)}
-                              </span>
+                              <div>
+                                <div className="flex items-center gap-1.5">
+                                  <span
+                                    className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                                      inv.role === 'editor'
+                                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                        : 'bg-amber-50 text-amber-700 border-amber-200'
+                                    }`}
+                                  >
+                                    {getRoleLabel(inv.role)}
+                                  </span>
+                                </div>
+                                <div className="text-[10px] text-slate-500 mt-0.5">
+                                  Kedaluwarsa: {formatDateTimeId(inv.expiresAt)}
+                                </div>
+                              </div>
                             </div>
-                            <div className="text-xs text-slate-500 font-mono mt-0.5">
-                              NPSN: {school.npsn || '-'}
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => void handleCopyCode(inv.code)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-[11px] font-semibold text-slate-700 cursor-pointer"
+                              >
+                                {copiedCode === inv.code ? (
+                                  <>
+                                    <Check className="w-3 h-3 text-emerald-600" />
+                                    <span>Tersalin</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="w-3 h-3" />
+                                    <span>Salin</span>
+                                  </>
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={revokingCode === inv.code}
+                                onClick={() => void handleRevokeInvite(inv.code)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-[11px] font-semibold text-rose-700 cursor-pointer disabled:opacity-50"
+                              >
+                                {revokingCode === inv.code ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <Trash2 className="w-3 h-3" />
+                                )}
+                                <span>Cabut</span>
+                              </button>
                             </div>
                           </div>
-                        </div>
-
-                        <div className="flex flex-wrap items-center gap-2 shrink-0">
-                          <button
-                            type="button"
-                            disabled={!canEdit || isBusy}
-                            onClick={() => startEdit(school)}
-                            title={
-                              canEdit
-                                ? 'Ubah nama sekolah atau NPSN'
-                                : 'Peran Viewer tidak dapat mengubah nama atau NPSN'
-                            }
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                            <span>Ubah</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            disabled={isBusy}
-                            onClick={() => {
-                              setErrorMessage(null);
-                              setEditingId(null);
-                              setConfirmRemoveId(
-                                isConfirmingRemove ? null : school.schoolId
-                              );
-                            }}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
-                          >
-                            <LogOut className="w-3.5 h-3.5" />
-                            <span>Keluarkan dari daftar saya</span>
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {isConfirmingRemove && (
-                      <div className="mt-3 p-3 rounded-xl bg-amber-50 border border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                        <div className="flex items-start gap-2 text-xs text-amber-900">
-                          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                          <span>
-                            Keluarkan <strong>{school.namaSekolah}</strong> dari daftar Anda? Data sekolah di cloud <strong>tidak akan dihapus</strong>.
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0 justify-end">
-                          <button
-                            type="button"
-                            disabled={isBusy}
-                            onClick={() => setConfirmRemoveId(null)}
-                            className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer disabled:opacity-50"
-                          >
-                            Batal
-                          </button>
-                          <button
-                            type="button"
-                            disabled={isBusy}
-                            onClick={() => void handleConfirmRemove(school)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold cursor-pointer disabled:opacity-60"
-                          >
-                            {isBusy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                            <span>Ya, Keluarkan</span>
-                          </button>
-                        </div>
+                        ))}
                       </div>
                     )}
                   </div>
-                );
-              })}
-            </div>
-          )}
-
-          {backupClearedMessage && (
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-xs text-emerald-800 flex items-center gap-2">
-              <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>{backupClearedMessage}</span>
-            </div>
-          )}
-
-          {isConfirmingClearBackup && (
-            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-start gap-2 text-xs text-amber-900">
-                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                <span>
-                  Hapus <strong>{legacyBackupCount}</strong> kunci cadangan lokal lama (<code>bosp_legacy_backup_*</code>) dari browser ini? Pastikan data sekolah yang dipulihkan sudah tampil lengkap terlebih dahulu.
-                </span>
+                </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0 justify-end">
-                <button
-                  type="button"
-                  onClick={() => setIsConfirmingClearBackup(false)}
-                  className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer"
-                >
-                  Batal
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const removed = clearLegacyBackupKeys();
-                    setLegacyBackupCount(0);
-                    setIsConfirmingClearBackup(false);
-                    setBackupClearedMessage(`${removed} kunci cadangan lokal lama telah dihapus dari browser.`);
-                  }}
-                  className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold cursor-pointer"
-                >
-                  Ya, Hapus Cadangan
-                </button>
+
+              {/* Bagian 2: Daftar Anggota */}
+              <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+                <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Users className="w-4 h-4 text-indigo-600" />
+                    <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wide">
+                      Daftar Anggota ({members.length})
+                    </h3>
+                  </div>
+                </div>
+
+                {membersError && (
+                  <div
+                    role="alert"
+                    className="m-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800"
+                  >
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    <span>{membersError}</span>
+                  </div>
+                )}
+
+                {membersLoading ? (
+                  <div className="py-8 flex items-center justify-center gap-2 text-xs text-slate-500">
+                    <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+                    <span>Memuat daftar anggota...</span>
+                  </div>
+                ) : members.length === 0 ? (
+                  <div className="py-8 text-center text-xs text-slate-500">
+                    Belum ada data anggota.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-slate-200">
+                    {members.map((member) => {
+                      const isSelf = member.uid === user.uid;
+                      const isBusy = memberBusyUid === member.uid;
+                      const isConfirmKick = confirmKickUid === member.uid;
+
+                      return (
+                        <div key={member.uid} className="p-3.5 space-y-2.5">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="text-xs font-bold text-slate-900 truncate">
+                                  {member.displayName || member.email || 'Pengguna'}
+                                </span>
+                                {isSelf && (
+                                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                                    Anda
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-slate-500 truncate">
+                                {member.email || '-'}
+                              </div>
+                              <div className="text-[10px] text-slate-400 mt-0.5">
+                                Bergabung: {formatDateId(member.addedAt)}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0">
+                              {isSelf || member.role === 'owner' ? (
+                                <span className="text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                  {getRoleLabel(member.role)}
+                                </span>
+                              ) : (
+                                <>
+                                  <select
+                                    value={member.role === 'editor' ? 'editor' : 'viewer'}
+                                    disabled={isBusy}
+                                    onChange={(e) =>
+                                      void handleRoleChange(
+                                        member,
+                                        e.target.value as 'editor' | 'viewer'
+                                      )
+                                    }
+                                    aria-label={`Ubah peran ${member.displayName || member.email}`}
+                                    className="px-2.5 py-1 text-xs font-semibold bg-slate-50 border border-slate-300 rounded-lg text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-none cursor-pointer disabled:opacity-50"
+                                  >
+                                    <option value="editor">Editor</option>
+                                    <option value="viewer">Viewer</option>
+                                  </select>
+
+                                  <button
+                                    type="button"
+                                    disabled={isBusy}
+                                    onClick={() =>
+                                      setConfirmKickUid(isConfirmKick ? null : member.uid)
+                                    }
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                                  >
+                                    <UserMinus className="w-3.5 h-3.5" />
+                                    <span>Keluarkan</span>
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+
+                          {isConfirmKick && (
+                            <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                              <span className="text-xs text-amber-900">
+                                Keluarkan <strong>{member.displayName || member.email}</strong> dari sekolah ini?
+                              </span>
+                              <div className="flex items-center gap-2 justify-end shrink-0">
+                                <button
+                                  type="button"
+                                  disabled={isBusy}
+                                  onClick={() => setConfirmKickUid(null)}
+                                  className="px-2.5 py-1 rounded border border-slate-300 bg-white hover:bg-slate-50 text-[11px] font-semibold text-slate-700 cursor-pointer disabled:opacity-50"
+                                >
+                                  Batal
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isBusy}
+                                  onClick={() => void handleKickMember(member)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-semibold cursor-pointer disabled:opacity-60"
+                                >
+                                  {isBusy && <Loader2 className="w-3 h-3 animate-spin" />}
+                                  <span>Ya, Keluarkan</span>
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           )}
-
-          <p className="text-[11px] text-slate-500 leading-relaxed">
-            Catatan: Mengeluarkan sekolah hanya menghapus entri dari daftar pribadi Anda. Dokumen dan riwayat sekolah di cloud tetap tersimpan utuh.
-          </p>
         </div>
 
         <div className="px-6 py-3.5 border-t border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
           <div className="flex flex-wrap items-center gap-2">
-            {onOpenRestoreSchool && (
+            {modalTab === 'schools' && onOpenRestoreSchool && (
               <button
                 type="button"
                 onClick={() => {
@@ -431,7 +1039,7 @@ export const ManageSchoolsModal: React.FC<ManageSchoolsModalProps> = ({
               </button>
             )}
 
-            {legacyBackupCount > 0 && (
+            {modalTab === 'schools' && legacyBackupCount > 0 && (
               <button
                 type="button"
                 onClick={() => setIsConfirmingClearBackup(true)}

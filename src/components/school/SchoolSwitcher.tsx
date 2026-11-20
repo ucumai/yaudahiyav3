@@ -3,6 +3,7 @@ import {
   Check,
   ChevronDown,
   Eye,
+  KeyRound,
   Plus,
   Search,
   Settings2
@@ -17,6 +18,7 @@ interface SchoolSwitcherProps {
   activeNpsn?: string;
   onSelectSchool: (schoolId: string) => void;
   onAddSchool: () => void;
+  onJoinByCode: () => void;
   onManageSchools: () => void;
   variant?: 'header' | 'sidebar';
 }
@@ -84,6 +86,7 @@ export const SchoolSwitcher: React.FC<SchoolSwitcherProps> = ({
   activeNpsn,
   onSelectSchool,
   onAddSchool,
+  onJoinByCode,
   onManageSchools,
   variant = 'header'
 }) => {
@@ -287,6 +290,17 @@ export const SchoolSwitcher: React.FC<SchoolSwitcherProps> = ({
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Tambah sekolah</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsOpen(false);
+                onJoinByCode();
+              }}
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-indigo-300 hover:bg-indigo-500/10 transition-colors cursor-pointer"
+            >
+              <KeyRound className="w-3.5 h-3.5" />
+              <span>Gabung dengan kode</span>
             </button>
             <button
               type="button"

@@ -40,6 +40,7 @@ interface SidebarProps {
   schools: SchoolSummary[];
   onSelectSchool: (schoolId: string) => void;
   onAddSchool: () => void;
+  onJoinByCode: () => void;
   onManageSchools: () => void;
   onRequestLogout: () => void;
 }
@@ -57,6 +58,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   schools,
   onSelectSchool,
   onAddSchool,
+  onJoinByCode,
   onManageSchools,
   onRequestLogout
 }) => {
@@ -236,6 +238,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
             onAddSchool={() => {
               onCloseMobile();
               onAddSchool();
+            }}
+            onJoinByCode={() => {
+              onCloseMobile();
+              onJoinByCode();
             }}
             onManageSchools={() => {
               onCloseMobile();

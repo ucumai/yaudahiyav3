@@ -51,6 +51,7 @@ interface HeaderProps {
   activeRole: SchoolRole;
   onSelectSchool: (schoolId: string) => void;
   onAddSchool: () => void;
+  onJoinByCode: () => void;
   onManageSchools: () => void;
   onRequestLogout: () => void;
 }
@@ -79,6 +80,7 @@ export const Header: React.FC<HeaderProps> = ({
   activeRole,
   onSelectSchool,
   onAddSchool,
+  onJoinByCode,
   onManageSchools,
   onRequestLogout
 }) => {
@@ -159,6 +161,7 @@ export const Header: React.FC<HeaderProps> = ({
                   activeNpsn={metadata.npsn}
                   onSelectSchool={onSelectSchool}
                   onAddSchool={onAddSchool}
+                  onJoinByCode={onJoinByCode}
                   onManageSchools={onManageSchools}
                   variant="header"
                 />

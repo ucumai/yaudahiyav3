@@ -651,3 +651,13 @@ export interface SchoolMember {
   inviteCode?: string;
 }
 
+export interface SchoolInvite {
+  code: string;
+  schoolId: string;
+  schoolName: string;
+  role: 'editor' | 'viewer';
+  createdBy: string;
+  createdAt?: any;
+  expiresAt: any;
+}
+

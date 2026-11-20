@@ -29,12 +29,17 @@ import {
   createMonthlyArchive
 } from './utils/monthArchiveUtils';
 import { ensureTransactionsClassification } from './utils/klasifikasiSpjHelper';
-import { AlertCircle, CheckCircle2, Loader2, LogOut, RefreshCw } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Loader2, LogOut, RefreshCw, ShieldAlert } from 'lucide-react';
 import { testFirestoreConnection, initAuth, googleSignIn, logoutGoogle } from './lib/firebase';
 import { User } from 'firebase/auth';
 import { SchoolContext } from './context/SchoolContext';
 import { readLS, writeLS, removeLS, hasSchoolLocalCache, clearAllBospStorage } from './lib/schoolStorage';
-import { renameSchoolInRegistry } from './lib/schoolRegistry';
+import {
+  removeSchoolFromMyList,
+  renameSchoolInRegistry,
+  subscribeMyMembership,
+  syncMySchoolRoleInRegistry
+} from './lib/schoolRegistry';
 import {
   findSchoolDatabaseFile,
   loadSchoolDataFromDrive,
@@ -69,6 +74,7 @@ export interface SchoolWorkspaceProps {
   onSwitchSchool: (schoolId: string) => void;
   schools: SchoolSummary[];
   onOpenAddSchool: () => void;
+  onOpenJoinByCode: () => void;
   onOpenManageSchools: () => void;
   externalRename?: ExternalSchoolRename | null;
 }
@@ -88,15 +94,20 @@ const sanitizeTeachers = (list: any[]): MasterGuru[] => {
 export function SchoolWorkspace(props: SchoolWorkspaceProps) {
   const {
     schoolId,
-    role,
+    role: initialRole,
     user,
     onSwitchSchool,
     schools,
     onOpenAddSchool,
+    onOpenJoinByCode,
     onOpenManageSchools,
     externalRename
   } = props;
-  const readOnly = role === 'viewer';
+  const [liveRole, setLiveRole] = useState<SchoolRole>(initialRole);
+  const [isMembershipRevoked, setIsMembershipRevoked] = useState<boolean>(false);
+  const [isRemovingRevokedEntry, setIsRemovingRevokedEntry] = useState<boolean>(false);
+  const role = liveRole;
+  const readOnly = role === 'viewer' || isMembershipRevoked;
   const activeSummary = schools.find((s) => s.schoolId === schoolId);
 
   const defaultMetadata: SchoolMetadata = {
@@ -219,6 +230,31 @@ export function SchoolWorkspace(props: SchoolWorkspaceProps) {
       npsn: externalRename.npsn
     }));
   }, [externalRename, schoolId]);
+
+  // Berlangganan status keanggotaan aktif (role live + deteksi pencabutan akses oleh Owner)
+  useEffect(() => {
+    setLiveRole(initialRole);
+    setIsMembershipRevoked(false);
+    const unsub = subscribeMyMembership(
+      schoolId,
+      user.uid,
+      (member) => {
+        if (!member) {
+          setIsMembershipRevoked(true);
+          return;
+        }
+        setIsMembershipRevoked(false);
+        setLiveRole(member.role);
+        if (member.role !== initialRole) {
+          void syncMySchoolRoleInRegistry(user.uid, schoolId, member.role).catch(() => {});
+        }
+      },
+      (err) => {
+        console.warn('Gagal memantau keanggotaan sekolah aktif:', err);
+      }
+    );
+    return () => unsub();
+  }, [schoolId, user.uid, initialRole]);
 
   // Flush pending debounced Firestore saves for this school on unmount
   useEffect(() => {
@@ -1086,6 +1122,7 @@ export function SchoolWorkspace(props: SchoolWorkspaceProps) {
           schools={schools}
           onSelectSchool={handleRequestSelectSchool}
           onAddSchool={onOpenAddSchool}
+          onJoinByCode={onOpenJoinByCode}
           onManageSchools={onOpenManageSchools}
           onRequestLogout={handleRequestLogout}
         />
@@ -1124,6 +1161,7 @@ export function SchoolWorkspace(props: SchoolWorkspaceProps) {
             activeRole={role}
             onSelectSchool={handleRequestSelectSchool}
             onAddSchool={onOpenAddSchool}
+            onJoinByCode={onOpenJoinByCode}
             onManageSchools={onOpenManageSchools}
             onRequestLogout={handleRequestLogout}
           />
@@ -1396,6 +1434,53 @@ export function SchoolWorkspace(props: SchoolWorkspaceProps) {
                       <span>{hasUnsyncedChanges ? 'Simpan & Keluar' : 'Keluar'}</span>
                     </>
                   )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal Pemberitahuan Akses Dicabut oleh Owner */}
+        {isMembershipRevoked && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-xs p-4 no-print"
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-rose-200 p-6 space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center shrink-0">
+                  <ShieldAlert className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    Akses Sekolah Dicabut
+                  </h3>
+                  <p className="mt-1 text-xs text-slate-600 leading-relaxed">
+                    Pemilik sekolah telah mengeluarkan akun Anda dari <strong>{activeDisplayName}</strong>. Anda tidak lagi memiliki akses ke data sekolah ini.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-2">
+                <button
+                  type="button"
+                  disabled={isRemovingRevokedEntry}
+                  onClick={async () => {
+                    if (isRemovingRevokedEntry) return;
+                    setIsRemovingRevokedEntry(true);
+                    try {
+                      await removeSchoolFromMyList(user.uid, schoolId);
+                    } catch {
+                      // ignore error
+                    } finally {
+                      setIsRemovingRevokedEntry(false);
+                    }
+                  }}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold cursor-pointer disabled:opacity-60"
+                >
+                  {isRemovingRevokedEntry && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>Tutup &amp; Hapus dari Daftar</span>
                 </button>
               </div>
             </div>
