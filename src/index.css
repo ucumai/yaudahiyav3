@@ -1,0 +1,172 @@
+@import "tailwindcss";
+
+@page {
+  size: A4 portrait;
+  margin: 0;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 0; /* Menghilangkan otomatis header browser (timestamp/jam, tanggal, title) dan footer URL */
+  }
+
+  html, body {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    font-size: 10pt !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 100% !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Hilangkan semua warna background abu-abu/biru container induk dan shadow */
+  #root,
+  .min-h-screen,
+  main,
+  div {
+    background-color: transparent !important;
+    box-shadow: none !important;
+  }
+
+  main {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .no-print,
+  nav,
+  header,
+  aside,
+  button,
+  .print\:hidden {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  .print\:block {
+    display: block !important;
+  }
+
+  .print-page-break,
+  .print\:page-break-after-always {
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+
+  /* Dokumen Formal Kedinasan A4 (Tripartit, BAST, SPJ) */
+  .a4-print-sheet {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    margin: 0 auto !important;
+    padding: 15mm 20mm 15mm 20mm !important;
+    width: 210mm !important;
+    max-width: 210mm !important;
+    box-sizing: border-box !important;
+    height: 297mm !important;
+    min-height: 297mm !important;
+    max-height: 297mm !important;
+    page-break-after: always !important;
+    break-after: page !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+  }
+
+  .a4-print-sheet:last-child {
+    page-break-after: auto !important;
+    break-after: auto !important;
+  }
+
+  /* Standar Output Dokumen Resmi Kedinasan (OfficialDocLayout) */
+  .official-doc-page {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: 210mm !important;
+    box-sizing: border-box !important;
+    min-height: auto !important;
+    overflow: visible !important;
+    display: block !important;
+    font-family: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif !important;
+  }
+
+  .official-doc-page table {
+    page-break-inside: auto !important;
+    break-inside: auto !important;
+  }
+
+  .official-doc-page tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .official-doc-page thead {
+    display: table-header-group !important;
+  }
+
+  /* Kwitansi Single Page Enclosure */
+  .kwitansi-page {
+    page-break-after: always !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    break-after: page !important;
+    margin: 0 auto !important;
+    padding: 7mm 9mm !important;
+    box-shadow: none !important;
+    border: 1.5px solid #000000 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    background: #ffffff !important;
+    box-sizing: border-box !important;
+    height: auto !important;
+    min-height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    display: block !important;
+  }
+
+  .kwitansi-page.paper-f4 {
+    max-height: none !important;
+    height: auto !important;
+  }
+
+  .kwitansi-page:last-child {
+    page-break-after: auto !important;
+    break-after: auto !important;
+  }
+}
+
+/* Screen Paper Simulation (Responsive Fit to Content) */
+.paper-container-a4 {
+  width: 100%;
+  max-width: 820px;
+  min-height: auto;
+  height: auto;
+}
+
+.paper-container-f4 {
+  width: 100%;
+  max-width: 840px;
+  min-height: auto;
+  height: auto;
+}

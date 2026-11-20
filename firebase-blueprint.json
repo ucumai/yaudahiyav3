@@ -1,0 +1,190 @@
+{
+  "entities": {
+    "SchoolData": {
+      "title": "School Data",
+      "description": "Master data for school profile, teachers, students, and extracurriculars",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerUid": { "type": "string" },
+        "metadata": { "type": "object" },
+        "teachers": { "type": "array" },
+        "students": { "type": "array" },
+        "eskulList": { "type": "array" },
+        "monthlyStore": { "type": "object" },
+        "activeMonthIndex": { "type": "number" },
+        "logistikStore": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "lastUpdated": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id"]
+    },
+    "Member": {
+      "title": "School Member",
+      "description": "Member and role assignment within a specific school",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["owner", "editor", "viewer"] },
+        "addedAt": { "type": "string", "format": "date-time" },
+        "inviteCode": { "type": "string" }
+      },
+      "required": ["uid", "email", "role", "addedAt"]
+    },
+    "Invite": {
+      "title": "School Invite",
+      "description": "Invitation code allowing a user to join a school with a specific role",
+      "type": "object",
+      "properties": {
+        "schoolId": { "type": "string" },
+        "role": { "type": "string", "enum": ["editor", "viewer"] },
+        "createdBy": { "type": "string" },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["schoolId", "role", "createdBy", "expiresAt"]
+    },
+    "MySchool": {
+      "title": "My School Summary",
+      "description": "User's personal school switcher summary entry",
+      "type": "object",
+      "properties": {
+        "schoolId": { "type": "string" },
+        "namaSekolah": { "type": "string" },
+        "npsn": { "type": "string" },
+        "role": { "type": "string", "enum": ["owner", "editor", "viewer"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["schoolId", "namaSekolah", "npsn", "role"]
+    },
+    "TeachersData": {
+      "title": "Teachers Data",
+      "description": "Master teachers and GTK records per school",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "teachers": { "type": "array" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id"]
+    },
+    "StudentsData": {
+      "title": "Students Data",
+      "description": "Master students records per school",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "students": { "type": "array" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id"]
+    },
+    "BkuData": {
+      "title": "BKU Financial Data",
+      "description": "Monthly transactions and receipts for BKU and RKAS",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "transactions": { "type": "array" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id"]
+    },
+    "LogistikData": {
+      "title": "Logistics and SPJ Data",
+      "description": "ATK and ALKEB distribution items and tripartite document configurations",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "barangList": { "type": "array" },
+        "config": { "type": "object" },
+        "months": { "type": "object" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id"]
+    },
+    "PerbaikanData": {
+      "title": "Perbaikan Sapras LPJ Data",
+      "description": "Monthly Perbaikan Sapras proposal, SPK, Berita Acara, and RAB items per school",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "months": { "type": "object" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id"]
+    },
+    "EskulData": {
+      "title": "Ekstrakurikuler LPJ Data",
+      "description": "Monthly Eskul LPJ, honor pelatih, student & coach attendance, and dynamic program report per school",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "records": { "type": "object" },
+        "masterSiswaEskul": { "type": "object" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id"]
+    },
+    "KombelData": {
+      "title": "Kombel LPJ Data",
+      "description": "Monthly Kombel document records, invitation, rundown, attendance, notula, and training material per transaction",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "records": { "type": "object" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}/mySchools/{schoolId}": {
+      "schema": { "$ref": "#/entities/MySchool" },
+      "description": "Stores summary list of schools accessible to the signed-in user for the school switcher"
+    },
+    "/schools/{schoolId}": {
+      "schema": { "$ref": "#/entities/SchoolData" },
+      "description": "Stores school metadata and master data for teachers, students, and extracurriculars"
+    },
+    "/schools/{schoolId}/members/{uid}": {
+      "schema": { "$ref": "#/entities/Member" },
+      "description": "Stores role-based membership records for each school"
+    },
+    "/invites/{code}": {
+      "schema": { "$ref": "#/entities/Invite" },
+      "description": "Stores invitation codes for joining a school"
+    },
+    "/teachers_data/{schoolId}": {
+      "schema": { "$ref": "#/entities/TeachersData" },
+      "description": "Stores master teachers and GTK records per school"
+    },
+    "/students_data/{schoolId}": {
+      "schema": { "$ref": "#/entities/StudentsData" },
+      "description": "Stores master student records per school"
+    },
+    "/bku_data/{schoolId}": {
+      "schema": { "$ref": "#/entities/BkuData" },
+      "description": "Stores BKU transactions and receipts for a school"
+    },
+    "/logistik_data/{schoolId}": {
+      "schema": { "$ref": "#/entities/LogistikData" },
+      "description": "Stores ATK/ALKEB logistics items and configuration"
+    },
+    "/perbaikan_data/{schoolId}": {
+      "schema": { "$ref": "#/entities/PerbaikanData" },
+      "description": "Stores Perbaikan Sapras LPJ configurations, committee, artisan, and RAB items"
+    },
+    "/eskul_data/{schoolId}": {
+      "schema": { "$ref": "#/entities/EskulData" },
+      "description": "Stores Eskul monthly LPJ, coach honor, attendance sheets, and dynamic activity reports"
+    },
+    "/kombel_data/{schoolId}": {
+      "schema": { "$ref": "#/entities/KombelData" },
+      "description": "Stores Kombel LPJ documents, notula, and training modules per transaction"
+    }
+  }
+}

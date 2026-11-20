@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Generator Dokumen Pekan Pembinaan</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#f3f1ec;--panel:#fff;--ink:#1d2a2e;--mut:#5d6b70;--line:#d9d6cd;--acc:#1f6f5c;--acc2:#e8f1ee;--warn:#8a5a00;--warnbg:#fff4d9;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#14191b;--panel:#1c2326;--ink:#e6ecec;--mut:#9aa8ab;--line:#33403f;--acc:#5fc3a8;--acc2:#1f332e;--warn:#f1c765;--warnbg:#3a3015}}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "Segoe UI",system-ui,sans-serif}
+header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:var(--panel)}
+header h1{font:700 18px/1.2 Georgia,"Times New Roman",serif;margin:0;flex:1;min-width:200px}
+button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:7px 14px;border-radius:6px}
+button.p{background:var(--acc);border-color:var(--acc);color:#fff}
+button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+main{display:grid;grid-template-columns:minmax(300px,380px) minmax(0,1fr);gap:16px;padding:16px;align-items:start}
+@media(min-width:761px){.form{max-height:calc(100vh - 90px);overflow:auto}.stage{position:sticky;top:8px;max-height:calc(100vh - 90px);overflow:auto}}
+@media(max-width:760px){main{grid-template-columns:1fr}}
+.form{display:flex;flex-direction:column;gap:12px}.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 14px 10px}.card details:last-child{border-bottom:0}
+details{border-bottom:1px solid var(--line);padding:8px 0}
+summary{font-weight:700;font-size:16px;list-style:none;pointer-events:none;padding:4px 0}summary::-webkit-details-marker{display:none}
+.er{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin:8px 0;padding:8px;border:1px solid var(--line);border-radius:6px}.er b{width:22px}.er input{flex:1 1 45%;min-width:110px;width:auto}.er button{padding:4px 10px}
+label{display:block;font-size:13px;color:var(--mut);margin:8px 0 2px}
+input,textarea,select{width:100%;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:5px;background:var(--bg);color:var(--ink)}
+textarea{resize:vertical;min-height:70px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+small{color:var(--mut);display:block;margin-top:2px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.tabs button[aria-selected=true]{background:var(--acc);color:#fff;border-color:var(--acc)}
+.stage{overflow-x:auto}
+.paper{background:#fff;color:#000;width:210mm;min-height:297mm;padding:14mm 18mm;margin:0 auto 14px;font:11pt/1.35 Arial,Helvetica,sans-serif;box-shadow:0 1px 6px rgba(0,0,0,.25);position:relative}
+.kop{display:flex;gap:12px;align-items:center;border-bottom:3px double #000;padding-bottom:4px;margin-bottom:14px}
+.kop .lg{width:70px;height:80px;border:1px dashed #999;display:flex;align-items:center;justify-content:center;font-size:9pt;color:#888;flex:none;overflow:hidden}
+.kop .lg img{max-width:100%;max-height:100%}
+.kop .tx{flex:1;text-align:center;font-family:"Times New Roman",serif}
+.kop .a{font-size:14pt}.kop .s{font:700 20pt Arial;margin:0}.kop .d{font-size:9pt;font-style:italic}
+.paper table{border-collapse:collapse;width:100%}
+.paper td,.paper th{padding:5px 6px;vertical-align:top}
+.grid td,.grid th{border:1px solid #000}.grid th{background:#c9c9c9}
+.meta td{padding:0 4px 0 0}
+.ttd{margin-left:55%;margin-top:18px}.sp{height:60px}
+.paper h3{text-align:center;margin:10px 0 14px;font-size:12pt}
+.empty{color:#b00;background:#fff3a0}
+.ana{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px 20px;line-height:1.55}
+.ana h2{font:700 17px Georgia,serif;margin:18px 0 6px}.ana h2:first-child{margin-top:0}
+.ana table{border-collapse:collapse;width:100%;font-size:13.5px;display:block;overflow-x:auto}
+.ana th,.ana td{border:1px solid var(--line);padding:5px 8px;text-align:left;vertical-align:top}.ana th{background:var(--acc2)}
+.warn{background:var(--warnbg);color:var(--warn);padding:8px 12px;border-radius:6px;margin:6px 0}
+.hide,.paper.off{display:none}
+@media print{
+ @page{size:A4;margin:0}
+ body{background:#fff}header,.form,.tabs,.ana{display:none!important}
+ main{display:block;padding:0}.stage{overflow:visible}
+ .paper{zoom:1!important;box-shadow:none;margin:0;page-break-after:always;width:210mm;min-height:297mm}
+ .paper.off{display:none}
+}
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
+</head>
+<body>
+<header>
+ <h1>Generator Dokumen Pekan Pembinaan</h1>
+ <button id="bReset">Reset contoh</button>
+ <button id="bPrint">Cetak tab ini</button>
+ <button id="bPrintAll" class="p">Cetak semua dokumen</button>
+</header>
+<main>
+<section class="form" id="form" aria-label="Formulir input">
+<div class="card"><details open><summary>1. Kegiatan</summary>
+ <label>Nama kegiatan</label><input data-k="kegiatan">
+ <div class="row"><div><label>Tahun pelajaran</label><input data-k="tp"></div><div><label>Tahun program</label><input data-k="tahunProg"></div></div>
+ <div class="row"><div><label>Tanggal</label><input type="date" data-k="tanggal"></div><div><label>Waktu</label><input data-k="waktu" placeholder="12.30 – 14.45 WIB"></div></div>
+ <label>Tempat</label><input data-k="tempat">
+ <label>Alamat tempat</label><input data-k="alamatTempat">
+ <label>Agenda pembahasan / materi</label><input data-k="materi" placeholder="mis. Implementasi Kurikulum Merdeka">
+</details>
+<details><summary>2. Surat undangan</summary>
+ <div class="row"><div><label>Nomor surat</label><input data-k="nomor"></div><div><label>Kota</label><input data-k="kota"></div></div>
+ <div class="row"><div><label>Tanggal surat</label><input type="date" data-k="tglSurat"></div><div><label>Lampiran</label><input data-k="lampiran"></div></div>
+ <label>Hal</label><input data-k="hal">
+ <label>Ditujukan kepada</label><input data-k="kepada">
+ <label>Dasar (satu per baris)</label><textarea data-k="dasar" rows="4"></textarea>
+ <label>Kelengkapan yang dibawa (satu per baris)</label><textarea data-k="bawa" rows="4"></textarea>
+</details>
+</div><div class="card"><details open><summary>3. Susunan acara</summary>
+ <div id="edAcara"></div>
+</details>
+<details><summary>4. Pegawai (daftar hadir)</summary>
+ <div id="edPeg"></div><small>Isi NIP dengan - untuk honorer. Daftar ini dipakai di daftar hadir dan peserta notula.</small>
+</details>
+</div><div class="card"><details open><summary>5. Pejabat &amp; notulen</summary>
+ <label>Kepala sekolah</label><input data-k="kepsek">
+ <div class="row"><div><label>Pangkat</label><input data-k="kepPangkat"></div><div><label>NIP</label><input data-k="kepNip"></div></div>
+ <label>Notulen</label><input data-k="notulen">
+</details>
+<details><summary>6. Notula</summary>
+ <label>Agenda rapat</label><input data-k="agendaRapat">
+ <label>Unggah PDF bahan materi</label><input type="file" accept="application/pdf" id="pdfIn"><small id="pdfInfo">Belum ada file.</small>
+ <label>Teks hasil baca (boleh diedit)</label><textarea id="pdfTxt" rows="6"></textarea>
+ <div style="display:flex;gap:6px;margin-top:6px"><button type="button" id="pdfUse">Masukkan ke isi materi</button><button type="button" id="pdfClr">Hapus teks</button></div>
+ <label>Pembukaan</label><textarea data-k="nPembukaan" rows="3"></textarea>
+ <label>Isi penyampaian materi</label><textarea data-k="nIsi" rows="5"></textarea>
+ <label>Penutup</label><textarea data-k="nPenutup" rows="3"></textarea>
+</details>
+</div>
+</section>
+
+<section class="stage">
+ <div class="tabs" role="tablist" id="tabs"></div>
+ <div id="docs"></div>
+ <div id="ana" class="ana hide"></div>
+</section>
+</main>
+
+<script>
+(function(){
+var KEY="gdp-v1";
+var DEF={
+ pem:"PEMERINTAH KABUPATEN BOGOR",dinas:"DINAS PENDIDIKAN",sekolah:"SD NEGERI SINGGASANA",
+ alamat:"Kp. Cihoe Ombang Rt. 04/04 Desa. Kuripan Kecamatan Ciseeng Kabupaten Bogor 16120",
+ npsn:"20200235",nss:"101020233030",email:"sdnsingasana8@gmail.com",
+ kegiatan:"Pekan Pembinaan Rutin Pendidik dan Tenaga Kependidikan",tp:"2024/2025",tahunProg:"2024",
+ tanggal:"",waktu:"12.30 – 14.45 WIB",tempat:"Ruang Kelas SD Negeri Singgasana",
+ alamatTempat:"Jalan Cihoe Ombang RT.004/004 Kec. Ciseeng Kab.Bogor",materi:"",
+ nomor:"",kota:"Ciseeng",tglSurat:"",lampiran:"1 (satu) lembar",hal:"Undangan",kepada:"Yth. Dewan Guru SD Negeri Singgasana",
+ dasar:"Program Tahunan SD Negeri Singgasana tentang Pengembangan Kompetensi dan Profesionalitas Pendidik dan Kependidikan Tahun {tahunProg}\nKurikulum Operasional Satuan Pendidikan (KOSP) Tahun Pelajaran {tp}",
+ bawa:"Laptop\nBuku Notula Rapat\nBuku Administrasi Kelas\nBuku Catatan Pribadi",
+ acara:"12.30 – 13.00 | Pembukaan | ARPAHUDIN\n13.00 – 13.15 | Sambutan Kepala Sekolah | NIAWATI, S.Pd, M.M\n13.15 – 14.30 | Penyampaian Materi : {materi} | IIS SURYANI, S.Pd.SD\n14.30 – 14.45 | Penutup/Doa | ARPAHUDIN",
+ pegawai:"NIAWATI, S.Pd, M.M | 197203182006042007 | Pembina Tk.I/IVa | Kepala Sekolah\nSUKROYATI, S.Pd.SD | 197106162000032006 | Penata III/c | Guru Kelas 1A\nANGGRAINI SRI UTAMI, S.Pd.SD | 197707312014052001 | Penata III/c | Guru Kelas 6B\nMISJA, S.Pd.SD | 197104302014071001 | IX (Sembilan) | Guru Kelas 6A\nINDRA GUNAWAN, S.Pd | 198507252022211003 | IX (Sembilan) | Guru Kelas 4\nHALIMAH, S.Pd | 196905202024212001 | IX (Sembilan) | Guru Kelas 1B\nIIS SURYANI, S.Pd.SD | 198903232023212026 | IX (Sembilan) | Guru Kelas 3A\nEKA FAUZIAH, S.Pd.SD | - | Honorer | Guru Kelas 2A\nLINDA MELIYANI, S.Pd | - | Honorer | Guru Kelas 5\nSITI RATNA SARI, S.Pd | - | Honorer | Guru Kelas 3B\nSITI AZIZAH NURFADILLAH | - | Honorer | Guru Kelas 2B\nPUTI ROSALINA, S.Pd. | - | Honorer | Guru Olahraga\nARPAHUDIN | - | Honorer | Guru Agama\nDEFITRA H. ROSYIDIN | - | Honorer | Operator",
+ kepsek:"NIAWATI, S.Pd, M.M",kepPangkat:"Pembina Tk.I",kepNip:"197203182006042007",notulen:"SUKROYATI, S.Pd.SD",
+ agendaRapat:"",nPembukaan:"",nIsi:"",nPenutup:""
+};
+var S=load(),logo="",cur="surat";
+function load(){var s={};try{s=JSON.parse(localStorage.getItem(KEY)||"{}")}catch(e){}return Object.assign({},DEF,s)}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
+function $(q,r){return (r||document).querySelector(q)}
+function esc(t){return String(t==null?"":t).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+function fill(t){return String(t||"").replace(/\{(\w+)\}/g,function(m,k){return S[k]||""})}
+var BL=["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
+function tgl(v){if(!v)return"";var p=v.split("-");return +p[2]+" "+BL[+p[1]-1]+" "+p[0]}
+function blank(v,l){return v?esc(v):'<span class="empty">'+(l||"……")+'</span>'}
+function lines(t){return fill(t).split("\n").map(function(x){return x.trim()}).filter(Boolean)}
+function rows(t){return lines(t).map(function(l){return l.split("|").map(function(c){return c.trim()})})}
+function ol(a){return '<ol style="margin:0;padding-left:22px">'+a.map(function(x){return"<li>"+esc(x)+"</li>"}).join("")+"</ol>"}
+function kop(){return '<div class="kop"><div class="tx"><div class="a">'+esc(S.pem)+'<br>'+esc(S.dinas)+'</div><div class="s">'+esc(S.sekolah)+'</div><div class="d">'+esc(S.alamat)+'<br>NPSN : '+esc(S.npsn)+' &nbsp; Email : '+esc(S.email)+' &nbsp; NSS : '+esc(S.nss)+'</div></div></div>'}
+function ttd(withPangkat){return '<div class="ttd">Kepala Sekolah,<div class="sp"></div>'+esc(S.kepsek)+(withPangkat?'<br>'+esc(S.kepPangkat):'')+'<br>NIP. '+esc(S.kepNip)+'</div>'}
+function nip(n){var p=rows(S.pegawai).filter(function(r){return r[0]===n})[0];return p&&p[1]&&p[1]!=="-"?p[1]:""}
+var DOCS={
+surat:function(){return '<div style="text-align:right;padding-right:30px">'+esc(S.kota)+', '+blank(tgl(S.tglSurat),"tanggal surat")+'</div>'+
+ '<table class="meta" style="width:auto"><tr><td>Nomor</td><td>: '+blank(S.nomor,"nomor")+'</td></tr><tr><td>Lampiran</td><td>: '+esc(S.lampiran)+'</td></tr><tr><td>Hal</td><td>: '+esc(S.hal)+'</td></tr></table>'+
+ '<p>Kepada<br>'+esc(S.kepada)+'<br>di -<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Tempat</p>Dasar :'+ol(lines(S.dasar))+
+ '<p style="text-align:justify;text-indent:32px">Maka akan dilaksanakan '+esc(S.kegiatan)+' Tahun Pelajaran '+esc(S.tp)+'. Sehubungan dengan itu kami meminta Bapak/Ibu untuk hadir pada kegiatan tersebut pada:</p>'+
+ '<table class="meta" style="margin-left:30px;width:auto"><tr><td>Tanggal</td><td>: '+blank(tgl(S.tanggal),"tanggal")+'</td></tr><tr><td>Waktu</td><td>: '+blank(S.waktu,"waktu")+'</td></tr><tr><td>Tempat</td><td>: '+esc(S.tempat)+'<br>'+esc(S.alamatTempat)+'</td></tr></table>'+
+ '<p style="margin-left:30px">Adapun kelengkapan yang harus dibawa adalah:</p><div style="margin-left:30px">'+ol(lines(S.bawa))+'</div>'+
+ '<p style="margin-left:30px">Demikian disampaikan untuk dilaksanakan dengan penuh tanggung jawab.</p>'+ttd(true)},
+acara:function(){return '<table class="meta"><tr><td>Lampiran</td><td>: Surat Undangan '+esc(S.kegiatan)+' Tahun Pelajaran '+esc(S.tp)+'</td></tr><tr><td>Nomor</td><td>: '+blank(S.nomor,"nomor")+'</td></tr><tr><td>Tanggal</td><td>: '+blank(tgl(S.tglSurat),"tanggal")+'</td></tr></table>'+
+ '<h3 style="margin-top:22px">Susunan Acara<br>'+esc(S.kegiatan)+'<br>Tahun Pelajaran '+esc(S.tp)+'</h3>'+
+ '<table class="grid"><tr><th style="width:22%">Jam</th><th>Agenda</th><th style="width:30%">Pembicara/Narasumber</th></tr>'+
+ rows(S.acara).map(function(r){return'<tr><td>'+esc(r[0])+'</td><td>'+esc(r[1])+'</td><td style="text-align:center">'+esc(r[2])+'</td></tr>'}).join("")+'</table>'+ttd(true)},
+hadir:function(){return '<h3 style="margin-bottom:4px">DAFTAR HADIR</h3><h3 style="margin-top:0;font-size:11pt">KEGIATAN '+esc(S.kegiatan.toUpperCase())+'<br>TAHUN PELAJARAN '+esc(S.tp)+'</h3>'+
+ '<table class="meta"><tr><td>Tanggal</td><td>: '+blank(tgl(S.tanggal),"tanggal")+'</td></tr><tr><td>Tempat</td><td>: '+esc(S.tempat)+'</td></tr><tr><td>Agenda Pembahasan</td><td>: '+blank(S.materi,"agenda")+'</td></tr></table><br>'+
+ '<table class="grid" style="font-size:9.5pt"><tr><th>No</th><th>Nama Pegawai</th><th>NIP</th><th>Pangkat, Gol</th><th>Jabatan</th><th>Tanda Tangan</th></tr>'+
+ rows(S.pegawai).map(function(r,i){return'<tr style="height:30px"><td style="text-align:center">'+(i+1)+'</td><td><b>'+esc(r[0])+'</b></td><td>'+esc(r[1])+'</td><td>'+esc(r[2])+'</td><td>'+esc(r[3])+'</td><td style="width:16%">'+(i%2?"":"")+'</td></tr>'}).join("")+'</table>'+
+ '<div class="ttd" style="margin-top:14px">Kepala Sekolah,<div class="sp" style="height:44px"></div>'+esc(S.kepsek)+'<br>NIP. '+esc(S.kepNip)+'</div>'},
+notula:function(){var P=rows(S.pegawai).map(function(r){return r[0]});
+ return '<h3>NOTULA PERTEMUAN</h3><p><b>Agenda Rapat</b> : '+blank(S.agendaRapat||S.materi,"agenda rapat")+'</p>'+
+ '<table class="meta"><tr><td>Tanggal</td><td>: '+blank(tgl(S.tanggal),"tanggal")+'</td></tr><tr><td>Waktu</td><td>: '+blank(S.waktu,"waktu")+'</td></tr><tr><td>Tempat</td><td>: '+esc(S.tempat)+'</td></tr></table>'+
+ '<p style="margin-bottom:2px">Peserta Kegiatan :</p><div style="font-size:9pt;columns:2">'+ol(P)+'</div>'+
+ '<p style="margin-bottom:2px"><b>ALUR PERTEMUAN</b></p><p style="margin:4px 0 0 30px">Pembukaan:<br>'+(S.nPembukaan?esc(S.nPembukaan).replace(/\n/g,"<br>"):'<span class="empty">&nbsp;isi pembukaan&nbsp;</span>')+'</p>'+
+ '<p style="margin:10px 0 0 30px">Isi Penyampaian Materi :<br>'+(S.nIsi?esc(S.nIsi).replace(/\n/g,"<br>"):'<span class="empty">&nbsp;isi materi&nbsp;</span>')+'</p>'+
+ '<p style="margin:10px 0 0 30px">Penutup:<br>'+(S.nPenutup?esc(S.nPenutup).replace(/\n/g,"<br>"):'<span class="empty">&nbsp;penutup&nbsp;</span>')+'</p>'+
+ '<table style="margin-top:30px;text-align:center"><tr><td>Mengetahui<br>Kepala Sekolah<div class="sp"></div>'+esc(S.kepsek)+'<br>NIP. '+esc(S.kepNip)+'</td><td>'+esc(S.kota)+', '+esc(tgl(S.tanggal))+'<br>Notulen<div class="sp"></div>'+esc(S.notulen)+'<br>'+(nip(S.notulen)?'NIP. '+esc(nip(S.notulen)):'')+'</td></tr></table>'}
+};
+var NAMES={surat:"Surat undangan",acara:"Susunan acara",hadir:"Daftar hadir",notula:"Notula"};
+function renderDocs(){var h="";Object.keys(DOCS).forEach(function(k){h+='<div class="paper'+(cur===k||cur==="all"?"":" off")+'" data-d="'+k+'">'+kop()+DOCS[k]()+'</div>'});$("#docs").innerHTML=h;$("#docs").className=cur==="ana"?"hide":"";fit()}
+function fit(){var w=$(".stage").clientWidth-6,z=Math.min(1,w/794);[].forEach.call(document.querySelectorAll(".paper"),function(p){p.style.zoom=z})}
+window.addEventListener("resize",fit);
+function renderTabs(){var t="";Object.keys(NAMES).forEach(function(k){t+='<button role="tab" data-t="'+k+'" aria-selected="'+(cur===k)+'">'+NAMES[k]+'</button>'});t+='<button role="tab" data-t="ana" aria-selected="'+(cur==="ana")+'">Analisis form</button>';$("#tabs").innerHTML=t}
+function show(t){cur=t;renderTabs();renderDocs();$("#ana").className="ana"+(t==="ana"?"":" hide");[].forEach.call(document.querySelectorAll(".paper"),function(p){p.classList.toggle("off",t!=="all"&&p.dataset.d!==t)})}
+function syncNotulen(){}
+function bind(){[].forEach.call(document.querySelectorAll("[data-k]"),function(el){var k=el.dataset.k;el.value=S[k]||"";el.addEventListener("input",function(){S[k]=el.value;save();if(k==="pegawai")syncNotulen();renderDocs();$("#docs").className=cur==="ana"?"hide":"";[].forEach.call(document.querySelectorAll(".paper"),function(p){p.classList.toggle("off",cur!=="all"&&p.dataset.d!==cur)})})});syncNotulen()}
+$("#tabs").addEventListener("click",function(e){var b=e.target.closest("button");if(b)show(b.dataset.t)});
+$("#bPrint").onclick=function(){if(cur==="ana")show("surat");window.print()};
+$("#bPrintAll").onclick=function(){var c=cur;show("all");window.print();setTimeout(function(){show(c)},500)};
+$("#bReset").onclick=function(){if(confirm("Kembalikan semua isian ke contoh awal?")){S=Object.assign({},DEF);save();bind();E1.redraw();E2.redraw();show(cur)}};
+$("#pdfIn").addEventListener("change",function(e){var f=e.target.files[0],info=$("#pdfInfo");if(!f)return;
+ if(!window.pdfjsLib){info.textContent="Pembaca PDF belum termuat. Muat ulang halaman.";return}
+ info.textContent="Membaca "+f.name+"…";
+ var r=new FileReader();r.onerror=fail;
+ function fail(){info.textContent="PDF tidak bisa dibaca. Coba file lain atau isi manual."}
+ r.onload=function(){
+  pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  pdfjsLib.getDocument({data:new Uint8Array(r.result),disableWorker:true}).promise.then(function(doc){
+   var out=[],n=doc.numPages,i=1;
+   function fin(){var tx=out.join("\n\n").trim();$("#pdfTxt").value=tx;info.textContent=tx?f.name+" · "+n+" halaman · "+tx.length+" karakter":f.name+" tidak berisi teks (kemungkinan hasil scan). Membaca scan butuh OCR dan belum tersedia."}
+   function next(){if(i>n){fin();return}
+    doc.getPage(i).then(function(p){return p.getTextContent()}).then(function(c){var y=null,t="";
+     c.items.forEach(function(it){if(y!==null&&Math.abs(it.transform[5]-y)>2&&!/\n$/.test(t))t+="\n";t+=it.str+(it.hasEOL?"\n":" ");y=it.transform[5]});
+     out.push(t.replace(/[ \t]+\n/g,"\n").replace(/\n{3,}/g,"\n\n").trim());i++;next()}).catch(fail)}
+   next()}).catch(fail)};
+ r.readAsArrayBuffer(f)});
+$("#pdfUse").onclick=function(){var t=$("#pdfTxt").value.trim();if(!t)return;S.nIsi=(S.nIsi?S.nIsi+"\n\n":"")+t;save();document.querySelector('[data-k="nIsi"]').value=S.nIsi;renderDocs()};
+$("#pdfClr").onclick=function(){$("#pdfTxt").value=""};
+
+$("#ana").innerHTML=
+'<h2>Hasil analisis dokumen</h2><p>Empat dokumen (undangan, susunan acara, daftar hadir, notula) memakai kop dan data yang sama. Karena itu cukup satu kali input, lalu semua dokumen terisi otomatis.</p>'+
+'<h2>Kolom form yang dibutuhkan</h2><table><tr><th>Kelompok</th><th>Field</th><th>Dipakai di</th></tr>'+
+'<tr><td>Kegiatan</td><td>Nama kegiatan, tahun pelajaran, tahun program, tanggal, waktu, tempat, alamat tempat, agenda/materi</td><td>Semua dokumen</td></tr>'+
+'<tr><td>Surat</td><td>Nomor, kota, tanggal surat, lampiran, hal, tujuan, daftar dasar, daftar kelengkapan</td><td>Undangan; nomor dan tanggal juga di susunan acara</td></tr>'+
+'<tr><td>Susunan acara</td><td>Baris berulang: jam, agenda, narasumber</td><td>Susunan acara</td></tr>'+
+'<tr><td>Pegawai</td><td>Nama, NIP, pangkat/golongan, jabatan (tabel master)</td><td>Daftar hadir, peserta notula, NIP notulen</td></tr>'+
+'<tr><td>Pejabat</td><td>Kepala sekolah (nama, pangkat, NIP), notulen (dipilih dari pegawai)</td><td>Tanda tangan di keempat dokumen</td></tr>'+
+'<tr><td>Notula</td><td>Agenda rapat, pembukaan, isi materi, penutup</td><td>Notula</td></tr>'+
+'<tr><td>Kop</td><td>Pemerintah, dinas, sekolah, alamat, NPSN, NSS, email, logo</td><td>Semua dokumen (isi tetap)</td></tr></table>'+
+'<h2>Jenis isian</h2><p><b>Tetap</b> (sekali isi): kop, kepala sekolah, daftar pegawai. <b>Per kegiatan</b>: tanggal, waktu, materi, nomor surat, narasumber, isi notula. <b>Otomatis</b>: peserta notula dan nomor urut daftar hadir dari data pegawai, NIP notulen dari data pegawai, tanggal dan materi disalin ke semua dokumen, kalimat dasar dan kegiatan memakai tahun pelajaran yang sama.</p>'+
+'<h2>Temuan pada dokumen sumber</h2>'+
+'<div class="warn">Nama ditulis SITI AZIZAH NURFADILLAH di daftar hadir tetapi NURFADILAH di notula. Di sini keduanya memakai satu ejaan karena sumbernya satu.</div>'+
+'<div class="warn">Pangkat kepala sekolah tertulis Pembina Tk.I/Iva di daftar hadir. Di sini ditulis IVa; periksa apakah ini yang benar.</div>'+
+'<div class="warn">Email di kop (sdnsingasana8) berbeda ejaan dari nama sekolah (Singgasana). Periksa apakah ada huruf g yang hilang.</div>'+
+'<div class="warn">Tanggal, waktu, nomor surat, agenda, dan isi notula kosong di sumber, jadi ditandai kuning sampai Anda mengisinya. NIP Arpahudin dan Defitra juga kosong; nama mereka tetap tampil di daftar hadir.</div>'+
+'<h2>Usulan tahap berikutnya</h2><p>Simpan beberapa kegiatan sekaligus (riwayat), ekspor ke Word atau PDF, nomor surat otomatis berurutan, dan isian narasumber yang dipilih dari daftar pegawai. Bila aplikasi ini mau digabung ke aplikasi Firebase Anda, struktur datanya sudah terpisah: satu koleksi pegawai dan satu koleksi kegiatan.</p>';
+
+function ed(id,key,labels){var box=$(id),n=labels.length,A;
+ function arr(){return S[key].split("\n").filter(function(l){return l.trim()}).map(function(l){var p=l.split("|").map(function(c){return c.trim()});while(p.length<n)p.push("");return p.slice(0,n)})}
+ function put(){S[key]=A.map(function(r){return r.join(" | ")}).join("\n");save();renderDocs()}
+ function draw(){box.innerHTML=A.map(function(r,i){return'<div class="er"><b>'+(i+1)+'</b>'+labels.map(function(l,j){return'<input aria-label="'+l+'" placeholder="'+l+'" data-i="'+i+'" data-j="'+j+'" value="'+esc(r[j])+'">'}).join("")+'<button type="button" data-del="'+i+'" aria-label="Hapus baris">×</button></div>'}).join("")+'<button type="button" data-add="1">+ Tambah baris</button>'}
+ box.addEventListener("input",function(e){var t=e.target;if(t.dataset.i==null)return;A[+t.dataset.i][+t.dataset.j]=t.value.replace(/\|/g,"");put()});
+ box.addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;if(b.dataset.del!=null)A.splice(+b.dataset.del,1);else A.push(labels.map(function(){return""}));put();draw()});
+ return{redraw:function(){A=arr();draw()},init:function(){A=arr();draw()}}}
+var E1=ed("#edAcara","acara",["Jam","Agenda","Narasumber"]),E2=ed("#edPeg","pegawai",["Nama","NIP","Pangkat, gol","Jabatan"]);E1.init();E2.init();
+[].forEach.call(document.querySelectorAll("details"),function(d){d.open=true});
+bind();show("surat");
+})();
+</script>
+</body>
+</html>

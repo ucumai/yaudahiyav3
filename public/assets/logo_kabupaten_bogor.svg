@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 605" width="500" height="605" preserveAspectRatio="xMidYMid meet">
+  <defs>
+    <path id="arc-prayoga" d="M 125,242 A 125,125 0 1,1 375,242" fill="none"/>
+    <path id="arc-kuta-text" d="M 152,345 Q 250,378 348,345" fill="none"/>
+    <path id="arc-tegar" d="M 75,475 Q 250,598 425,475" fill="none"/>
+  </defs>
+
+  <!-- 1. Perisai Kuning Luar -->
+  <path d="M 16,14 L 484,14 L 484,336 C 484,472 402,546 250,594 C 98,546 16,472 16,336 Z"
+        fill="#FFE500" stroke="#000000" stroke-width="12" stroke-linejoin="round"/>
+
+  <!-- 2. Perisai Segilima Hijau -->
+  <polygon points="250,52 458,176 378,416 122,416 42,176"
+           fill="#00923F" stroke="#000000" stroke-width="8" stroke-linejoin="round"/>
+
+  <!-- Garis Kuning Dalam Segilima Hijau -->
+  <polygon points="250,68 444,182 368,404 132,404 56,182"
+           fill="none" stroke="#FFE500" stroke-width="4" stroke-linejoin="round"/>
+
+  <!-- 3. Lingkaran Hitam Tengah -->
+  <circle cx="250" cy="242" r="135" fill="#000000" stroke="#FFFFFF" stroke-width="7"/>
+
+  <!-- Teks Lingkaran Atas: PRAYOGA TOHAGA (KUNING EMAS SESUAI LOGO ASLI) -->
+  <text font-family="'Arial Black', Arial, sans-serif" font-weight="900" font-size="27" fill="#FFE500" letter-spacing="4">
+    <textPath href="#arc-prayoga" startOffset="50%" text-anchor="middle">
+      PRAYOGA  TOHAGA
+    </textPath>
+  </text>
+
+  <!-- 4. Segitiga Sama Sisi Dalam Lingkaran -->
+  <g id="inner-triangle">
+    <!-- Segitiga Dasar Latar Kuning -->
+    <polygon points="250,132 148,302 352,302" fill="#FFE500" stroke="#FFFFFF" stroke-width="9" stroke-linejoin="round"/>
+    <polygon points="250,132 148,302 352,302" fill="none" stroke="#000000" stroke-width="2" stroke-linejoin="round"/>
+
+    <!-- Puncak Gunung Biru & Langit -->
+    <polygon points="250,140 230,172 270,172" fill="#00A3E0"/>
+    <polygon points="250,140 240,158 260,158" fill="#80D0F2"/>
+
+    <!-- Gelombang Air Kiri (Biru & Cyan) -->
+    <path d="M 160,268 Q 180,260 200,268 T 240,268 M 156,278 Q 176,270 196,278 T 236,278 M 152,288 Q 172,280 192,288 T 232,288"
+          fill="none" stroke="#0072CE" stroke-width="3"/>
+    <path d="M 160,264 Q 180,256 200,264 T 240,264 M 156,274 Q 176,266 196,274 T 236,274 M 152,284 Q 172,276 192,284 T 232,284"
+          fill="none" stroke="#00A3E0" stroke-width="2"/>
+
+    <!-- Gelombang Air Kanan (Merah & Oranye) -->
+    <path d="M 260,268 Q 280,260 300,268 T 340,268 M 264,278 Q 284,270 304,278 T 344,278 M 268,288 Q 288,280 308,288 T 348,288"
+          fill="none" stroke="#E53935" stroke-width="3"/>
+    <path d="M 260,264 Q 280,256 300,264 T 340,264 M 264,274 Q 284,266 304,274 T 344,274 M 268,284 Q 288,276 308,284 T 348,284"
+          fill="none" stroke="#FFA000" stroke-width="2"/>
+
+    <!-- Oval Putih Tengah Tempat Kujang -->
+    <ellipse cx="250" cy="226" rx="34" ry="48" fill="#FFFFFF" stroke="#000000" stroke-width="2.5"/>
+
+    <!-- Padi (Kiri - Kuning/Hijau) & Kapas (Kanan - Putih/Hijau) -->
+    <path d="M 244,260 Q 224,236 233,202 Q 241,190 244,186" fill="none" stroke="#00923F" stroke-width="3"/>
+    <circle cx="227" cy="214" r="3.5" fill="#FFE500" stroke="#00923F" stroke-width="1"/>
+    <circle cx="231" cy="228" r="3.5" fill="#FFE500" stroke="#00923F" stroke-width="1"/>
+    <circle cx="236" cy="242" r="3.5" fill="#FFE500" stroke="#00923F" stroke-width="1"/>
+
+    <path d="M 256,260 Q 276,236 267,202 Q 259,190 256,186" fill="none" stroke="#00923F" stroke-width="3"/>
+    <circle cx="273" cy="214" r="3.8" fill="#FFFFFF" stroke="#00923F" stroke-width="1.2"/>
+    <circle cx="269" cy="228" r="3.8" fill="#FFFFFF" stroke="#00923F" stroke-width="1.2"/>
+    <circle cx="264" cy="242" r="3.8" fill="#FFFFFF" stroke="#00923F" stroke-width="1.2"/>
+
+    <!-- Kujang Hitam -->
+    <path d="M 250,190 C 242,196 240,206 242,212 C 244,220 246,228 242,236 C 244,244 252,248 252,252 C 255,252 257,240 257,234 C 255,224 259,216 259,208 C 257,196 253,190 250,190 Z"
+          fill="#000000"/>
+    <circle cx="250" cy="210" r="2" fill="#FFFFFF"/>
+    <circle cx="250" cy="220" r="2" fill="#FFFFFF"/>
+    <circle cx="249" cy="230" r="2" fill="#FFFFFF"/>
+  </g>
+
+  <!-- Teks SAYAGA di Bawah Segitiga (KUNING EMAS SESUAI LOGO ASLI) -->
+  <text font-family="'Arial Black', Arial, sans-serif" font-weight="900" font-size="24" fill="#FFE500" letter-spacing="4.5" x="250" y="338" text-anchor="middle">
+    SAYAGA
+  </text>
+
+  <!-- 5. Pita Kuning KUTA UDAYA WANCA -->
+  <g id="pita-kuta">
+    <path d="M 148,326 Q 250,360 352,326 L 342,356 Q 250,390 158,356 Z"
+          fill="#FFE500" stroke="#000000" stroke-width="4.5" stroke-linejoin="round"/>
+    <polygon points="148,326 158,356 138,348" fill="#D4BD00" stroke="#000000" stroke-width="2"/>
+    <polygon points="352,326 342,356 362,348" fill="#D4BD00" stroke="#000000" stroke-width="2"/>
+
+    <text font-family="'Arial Black', Arial, sans-serif" font-weight="900" font-size="16.5" fill="#000000" letter-spacing="2.2">
+      <textPath href="#arc-kuta-text" startOffset="50%" text-anchor="middle">
+        KUTA UDAYA WANCA
+      </textPath>
+    </text>
+  </g>
+
+  <!-- 6. Semboyan TEGAR BERIMAN di Bawah Perisai (HITAM TEBAL) -->
+  <text font-family="'Arial Black', Arial, sans-serif" font-weight="900" font-size="38" fill="#000000" letter-spacing="5.5">
+    <textPath href="#arc-tegar" startOffset="50%" text-anchor="middle">
+      TEGAR BERIMAN
+    </textPath>
+  </text>
+</svg>

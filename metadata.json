@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix Yaudah iya v2.2 kombel",
+  "description": "Aplikasi pengolah, rekonsiliasi, dan visualisasi data transaksi BKU dan RKAS BOSP dengan hierarki Parent-Child.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
