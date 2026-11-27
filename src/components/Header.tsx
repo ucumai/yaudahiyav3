@@ -10,7 +10,8 @@ import {
   LayoutDashboard,
   Database,
   FileCheck2,
-  LogOut
+  LogOut,
+  ShieldCheck
 } from 'lucide-react';
 import { ActiveTab } from './Sidebar';
 import { CloudSyncBadge } from './CloudSyncBadge';
@@ -53,6 +54,9 @@ interface HeaderProps {
   onAddSchool: () => void;
   onJoinByCode: () => void;
   onManageSchools: () => void;
+  canCreateSchool?: boolean;
+  isSuperAdmin?: boolean;
+  onOpenUserManagement?: () => void;
   onRequestLogout: () => void;
 }
 
@@ -82,6 +86,9 @@ export const Header: React.FC<HeaderProps> = ({
   onAddSchool,
   onJoinByCode,
   onManageSchools,
+  canCreateSchool = true,
+  isSuperAdmin = false,
+  onOpenUserManagement,
   onRequestLogout
 }) => {
   const getTabTitle = () => {
@@ -163,6 +170,7 @@ export const Header: React.FC<HeaderProps> = ({
                   onAddSchool={onAddSchool}
                   onJoinByCode={onJoinByCode}
                   onManageSchools={onManageSchools}
+                  canCreateSchool={canCreateSchool}
                   variant="header"
                 />
 
@@ -205,6 +213,18 @@ export const Header: React.FC<HeaderProps> = ({
               lastSyncedTime={lastSyncedTime}
               onForceSync={onForceSync}
             />
+
+            {isSuperAdmin && onOpenUserManagement && (
+              <button
+                type="button"
+                onClick={onOpenUserManagement}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/35 border border-indigo-500/40 text-indigo-200 hover:text-white text-xs font-semibold transition-colors cursor-pointer"
+                title="Kelola daftar email Google yang diizinkan mengakses aplikasi"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-indigo-300" />
+                <span>Pengguna</span>
+              </button>
+            )}
 
             <button
               type="button"

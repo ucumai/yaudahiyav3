@@ -30,9 +30,44 @@
         "displayName": { "type": "string" },
         "role": { "type": "string", "enum": ["owner", "editor", "viewer"] },
         "addedAt": { "type": "string", "format": "date-time" },
-        "inviteCode": { "type": "string" }
+        "inviteCode": { "type": "string" },
+        "emailInviteId": { "type": "string" }
       },
       "required": ["uid", "email", "role", "addedAt"]
+    },
+    "AllowedUser": {
+      "title": "Allowed User",
+      "description": "Allowlisted Google email permitted to access the application",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "systemRole": { "type": "string", "enum": ["super_admin", "operator"] },
+        "active": { "type": "boolean" },
+        "canCreateSchool": { "type": "boolean" },
+        "addedBy": { "type": "string" },
+        "lastUid": { "type": "string" },
+        "lastLoginAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "systemRole", "active", "canCreateSchool"]
+    },
+    "EmailInvite": {
+      "title": "Email School Invite",
+      "description": "Pending direct assignment linking a registered email to a school upon sign-in",
+      "type": "object",
+      "properties": {
+        "schoolId": { "type": "string" },
+        "schoolName": { "type": "string" },
+        "npsn": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["editor", "viewer"] },
+        "createdBy": { "type": "string" },
+        "createdByEmail": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["schoolId", "schoolName", "email", "role", "createdBy"]
     },
     "Invite": {
       "title": "School Invite",
@@ -154,6 +189,14 @@
     "/schools/{schoolId}/members/{uid}": {
       "schema": { "$ref": "#/entities/Member" },
       "description": "Stores role-based membership records for each school"
+    },
+    "/allowed_users/{email}": {
+      "schema": { "$ref": "#/entities/AllowedUser" },
+      "description": "Allowlist of registered Google emails permitted to access the app"
+    },
+    "/email_invites/{inviteId}": {
+      "schema": { "$ref": "#/entities/EmailInvite" },
+      "description": "Direct email-based school invitations claimed automatically on login"
     },
     "/invites/{code}": {
       "schema": { "$ref": "#/entities/Invite" },

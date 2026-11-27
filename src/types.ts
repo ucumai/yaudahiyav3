@@ -649,6 +649,7 @@ export interface SchoolMember {
   role: SchoolRole;
   addedAt: any;
   inviteCode?: string;
+  emailInviteId?: string;
 }
 
 export interface SchoolInvite {
@@ -659,5 +660,32 @@ export interface SchoolInvite {
   createdBy: string;
   createdAt?: any;
   expiresAt: any;
+}
+
+export type SystemRole = 'super_admin' | 'operator';
+
+export interface AllowedUserRecord {
+  email: string;
+  displayName: string;
+  systemRole: SystemRole;
+  active: boolean;
+  canCreateSchool: boolean;
+  addedBy?: string;
+  lastUid?: string;
+  lastLoginAt?: any;
+  createdAt?: any;
+  updatedAt?: any;
+}
+
+export interface EmailSchoolInvite {
+  id: string;
+  schoolId: string;
+  schoolName: string;
+  npsn?: string;
+  email: string;
+  role: 'editor' | 'viewer';
+  createdBy: string;
+  createdByEmail?: string;
+  createdAt?: any;
 }
 

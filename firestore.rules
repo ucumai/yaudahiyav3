@@ -3,36 +3,104 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     function signedIn() { return request.auth != null; }
+    function hasVerifiedEmail() {
+      return signedIn()
+        && ('email' in request.auth.token)
+        && request.auth.token.email is string
+        && request.auth.token.email_verified == true;
+    }
+    function myEmail() { return request.auth.token.email.lower(); }
     function isValidId(id) {
       return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
+    function isValidEmailId(email) {
+      return email is string
+        && email.size() >= 3
+        && email.size() <= 254
+        && email == email.lower()
+        && email.matches('^[^/\\s]+@[^/\\s]+\\.[^/\\s]+$');
+    }
+    function allowedUserDoc(email) {
+      return /databases/$(database)/documents/allowed_users/$(email);
+    }
+    function isBootstrapAdmin() {
+      return hasVerifiedEmail() && myEmail() == 'ucum.270367@gmail.com';
+    }
+    function isAllowedUser() {
+      return isBootstrapAdmin()
+        || (hasVerifiedEmail()
+            && exists(allowedUserDoc(myEmail()))
+            && get(allowedUserDoc(myEmail())).data.active == true);
+    }
+    function isSuperAdmin() {
+      return isBootstrapAdmin()
+        || (isAllowedUser()
+            && get(allowedUserDoc(myEmail())).data.systemRole == 'super_admin');
+    }
+    function canCreateNewSchool() {
+      return isSuperAdmin()
+        || (isAllowedUser()
+            && get(allowedUserDoc(myEmail())).data.canCreateSchool == true);
+    }
+
     function schoolDoc(schoolId) { return /databases/$(database)/documents/schools/$(schoolId); }
     function memberDoc(schoolId, uid) { return /databases/$(database)/documents/schools/$(schoolId)/members/$(uid); }
-    function isMember(schoolId) { return signedIn() && exists(memberDoc(schoolId, request.auth.uid)); }
+    function isMember(schoolId) { return isAllowedUser() && exists(memberDoc(schoolId, request.auth.uid)); }
     function myRole(schoolId) { return get(memberDoc(schoolId, request.auth.uid)).data.role; }
-    function canWrite(schoolId) { return signedIn() && myRole(schoolId) in ['owner', 'editor']; }
-    function isOwner(schoolId) { return signedIn() && myRole(schoolId) == 'owner'; }
+    function canWrite(schoolId) { return isAllowedUser() && myRole(schoolId) in ['owner', 'editor']; }
+    function isOwner(schoolId) { return isAllowedUser() && myRole(schoolId) == 'owner'; }
 
     // Default deny
     match /{document=**} { allow read, write: if false; }
 
-    // Uji koneksi (hanya untuk user yang sudah login)
+    // Uji koneksi (untuk akun yang sudah login)
     match /test/{docId} { allow read: if signedIn(); }
+
+    // Daftar email yang diizinkan masuk ke aplikasi (Whitelist Opsi A)
+    match /allowed_users/{email} {
+      allow get: if isSuperAdmin() || (hasVerifiedEmail() && myEmail() == email);
+      allow list: if isSuperAdmin();
+      allow create: if isSuperAdmin()
+                    && isValidEmailId(email)
+                    && request.resource.data.email == email
+                    && request.resource.data.systemRole in ['super_admin', 'operator']
+                    && request.resource.data.active is bool
+                    && request.resource.data.canCreateSchool is bool;
+      allow update: if (
+        isSuperAdmin()
+        && isValidEmailId(email)
+        && request.resource.data.email == email
+        && request.resource.data.systemRole in ['super_admin', 'operator']
+        && request.resource.data.active is bool
+        && request.resource.data.canCreateSchool is bool
+        && (email != 'ucum.270367@gmail.com'
+            || (request.resource.data.active == true && request.resource.data.systemRole == 'super_admin'))
+      ) || (
+        isAllowedUser()
+        && myEmail() == email
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastUid', 'lastLoginAt', 'displayName', 'updatedAt'])
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.active == resource.data.active
+        && request.resource.data.systemRole == resource.data.systemRole
+        && request.resource.data.canCreateSchool == resource.data.canCreateSchool
+      );
+      allow delete: if isSuperAdmin() && email != 'ucum.270367@gmail.com';
+    }
 
     // Daftar sekolah milik pengguna (hanya untuk menu switcher)
     match /users/{uid}/mySchools/{schoolId} {
-      allow read: if signedIn() && request.auth.uid == uid;
-      allow write: if signedIn() && request.auth.uid == uid && isValidId(schoolId);
+      allow read: if isAllowedUser() && request.auth.uid == uid;
+      allow write: if isAllowedUser() && request.auth.uid == uid && isValidId(schoolId);
     }
 
     // Dokumen utama sekolah
     match /schools/{schoolId} {
       allow read: if isMember(schoolId);
-      // Buat sekolah baru: pembuat otomatis menjadi ownerUid
-      allow create: if signedIn() && isValidId(schoolId)
+      // Buat sekolah baru: hanya email terdaftar yang diizinkan membuat sekolah
+      allow create: if canCreateNewSchool() && isValidId(schoolId)
                     && request.resource.data.ownerUid == request.auth.uid;
-      // Klaim sekolah LAMA yang belum punya pemilik (dipakai Tahap 4, lalu aturan ini dihapus)
-      allow update: if signedIn() && isValidId(schoolId)
+      // Klaim sekolah LAMA yang belum punya pemilik
+      allow update: if canCreateNewSchool() && isValidId(schoolId)
                     && !('ownerUid' in resource.data)
                     && request.resource.data.ownerUid == request.auth.uid;
       // Update normal: editor/owner, ownerUid tidak boleh berubah
@@ -42,38 +110,76 @@ service cloud.firestore {
 
       // Anggota sekolah
       match /members/{uid} {
-        allow read: if signedIn() && (request.auth.uid == uid || isMember(schoolId));
+        allow read: if isAllowedUser() && (request.auth.uid == uid || isMember(schoolId));
         // (a) pemilik pertama saat sekolah dibuat / diklaim (dalam batch yang sama)
-        allow create: if signedIn() && request.auth.uid == uid
+        allow create: if canCreateNewSchool() && request.auth.uid == uid
                       && request.resource.data.role == 'owner'
                       && getAfter(schoolDoc(schoolId)).data.ownerUid == request.auth.uid
                       && (!exists(schoolDoc(schoolId)) || !('ownerUid' in get(schoolDoc(schoolId)).data));
         // (b) bergabung lewat kode undangan sekali pakai (hapus invites/{code} dalam batch yang sama)
-        allow create: if signedIn() && request.auth.uid == uid
+        allow create: if isAllowedUser() && request.auth.uid == uid
                       && request.resource.data.role in ['editor', 'viewer']
                       && request.resource.data.inviteCode is string
                       && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode)).data.schoolId == schoolId
                       && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode)).data.role == request.resource.data.role
                       && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode)).data.expiresAt > request.time
                       && !existsAfter(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode));
+        // (c) bergabung otomatis lewat penugasan email (/email_invites/{id}) dalam batch yang sama
+        allow create: if isAllowedUser() && request.auth.uid == uid
+                      && request.resource.data.role in ['editor', 'viewer']
+                      && request.resource.data.emailInviteId is string
+                      && isValidId(request.resource.data.emailInviteId)
+                      && get(/databases/$(database)/documents/email_invites/$(request.resource.data.emailInviteId)).data.schoolId == schoolId
+                      && get(/databases/$(database)/documents/email_invites/$(request.resource.data.emailInviteId)).data.role == request.resource.data.role
+                      && get(/databases/$(database)/documents/email_invites/$(request.resource.data.emailInviteId)).data.email == myEmail()
+                      && !existsAfter(/databases/$(database)/documents/email_invites/$(request.resource.data.emailInviteId));
         // owner mengubah peran / mengeluarkan anggota lain; anggota boleh keluar sendiri (kecuali owner)
         allow update: if isOwner(schoolId) && uid != request.auth.uid && request.resource.data.role in ['editor', 'viewer'];
         allow delete: if (isOwner(schoolId) && uid != request.auth.uid)
-                      || (request.auth.uid == uid && resource.data.role != 'owner');
+                      || (isAllowedUser() && request.auth.uid == uid && resource.data.role != 'owner');
       }
     }
 
-    // Kode undangan sekali pakai. Get untuk penerima undangan; list hanya untuk pembuat undangan miliknya.
+    // Kode undangan sekali pakai. Get untuk penerima terdaftar; list hanya untuk pembuat undangan miliknya.
     match /invites/{code} {
-      allow get: if signedIn();
-      allow list: if signedIn() && resource.data.createdBy == request.auth.uid;
-      allow create: if signedIn() && isOwner(request.resource.data.schoolId)
+      allow get: if isAllowedUser();
+      allow list: if isAllowedUser() && resource.data.createdBy == request.auth.uid;
+      allow create: if isAllowedUser() && isOwner(request.resource.data.schoolId)
                     && request.resource.data.createdBy == request.auth.uid
                     && request.resource.data.role in ['editor', 'viewer'];
-      allow delete: if signedIn() && (
+      allow delete: if isAllowedUser() && (
         resource.data.createdBy == request.auth.uid
         || (existsAfter(memberDoc(resource.data.schoolId, request.auth.uid))
             && getAfter(memberDoc(resource.data.schoolId, request.auth.uid)).data.inviteCode == code)
+      );
+    }
+
+    // Penugasan / undangan langsung ke email terdaftar
+    match /email_invites/{inviteId} {
+      allow get: if isAllowedUser() && (
+        isSuperAdmin()
+        || resource.data.email == myEmail()
+        || resource.data.createdBy == request.auth.uid
+        || isOwner(resource.data.schoolId)
+      );
+      allow list: if isAllowedUser() && (
+        isSuperAdmin()
+        || resource.data.email == myEmail()
+        || resource.data.createdBy == request.auth.uid
+      );
+      allow create: if isAllowedUser() && isValidId(inviteId)
+                    && (isSuperAdmin() || isOwner(request.resource.data.schoolId))
+                    && request.resource.data.createdBy == request.auth.uid
+                    && request.resource.data.role in ['editor', 'viewer']
+                    && request.resource.data.schoolId is string
+                    && isValidEmailId(request.resource.data.email);
+      allow delete: if isAllowedUser() && (
+        isSuperAdmin()
+        || resource.data.createdBy == request.auth.uid
+        || isOwner(resource.data.schoolId)
+        || (resource.data.email == myEmail()
+            && existsAfter(memberDoc(resource.data.schoolId, request.auth.uid))
+            && getAfter(memberDoc(resource.data.schoolId, request.auth.uid)).data.emailInviteId == inviteId)
       );
     }
 

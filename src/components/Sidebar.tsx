@@ -42,6 +42,9 @@ interface SidebarProps {
   onAddSchool: () => void;
   onJoinByCode: () => void;
   onManageSchools: () => void;
+  canCreateSchool?: boolean;
+  isSuperAdmin?: boolean;
+  onOpenUserManagement?: () => void;
   onRequestLogout: () => void;
 }
 
@@ -60,6 +63,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onAddSchool,
   onJoinByCode,
   onManageSchools,
+  canCreateSchool = true,
+  isSuperAdmin = false,
+  onOpenUserManagement,
   onRequestLogout
 }) => {
   const { schoolId, role, readOnly } = useSchool();
@@ -247,6 +253,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               onCloseMobile();
               onManageSchools();
             }}
+            canCreateSchool={canCreateSchool}
             variant="sidebar"
           />
         </div>
@@ -447,6 +454,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
               Periode: {metadata.bulanTahun}
             </p>
           </div>
+          {isSuperAdmin && onOpenUserManagement && (
+            <button
+              type="button"
+              onClick={() => {
+                onCloseMobile();
+                onOpenUserManagement();
+              }}
+              className="w-full lg:hidden flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-indigo-500/40 bg-indigo-600/20 hover:bg-indigo-600/35 text-indigo-200 text-xs font-semibold transition-colors cursor-pointer"
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-indigo-300" />
+              <span>Kelola Pengguna</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => {

@@ -115,9 +115,9 @@ export const LoginScreen: React.FC = () => {
           </button>
         </div>
 
-        <div className="mt-6 pt-5 border-t border-slate-100 flex items-center justify-center gap-2 text-xs text-slate-500">
+        <div className="mt-6 pt-5 border-t border-slate-100 flex items-center justify-center gap-2 text-xs text-slate-500 text-center">
           <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-          <span>Data tiap sekolah terisolasi aman per akun &amp; keanggotaan</span>
+          <span>Khusus akun Google yang telah didaftarkan oleh Admin sistem</span>
         </div>
       </div>
     </div>

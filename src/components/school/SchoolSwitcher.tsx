@@ -20,6 +20,7 @@ interface SchoolSwitcherProps {
   onAddSchool: () => void;
   onJoinByCode: () => void;
   onManageSchools: () => void;
+  canCreateSchool?: boolean;
   variant?: 'header' | 'sidebar';
 }
 
@@ -88,6 +89,7 @@ export const SchoolSwitcher: React.FC<SchoolSwitcherProps> = ({
   onAddSchool,
   onJoinByCode,
   onManageSchools,
+  canCreateSchool = true,
   variant = 'header'
 }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -280,17 +282,19 @@ export const SchoolSwitcher: React.FC<SchoolSwitcherProps> = ({
           </div>
 
           <div className="p-1.5 border-t border-slate-800 bg-slate-950/70 space-y-1">
-            <button
-              type="button"
-              onClick={() => {
-                setIsOpen(false);
-                onAddSchool();
-              }}
-              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-emerald-400 hover:bg-emerald-500/10 transition-colors cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Tambah sekolah</span>
-            </button>
+            {canCreateSchool && (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsOpen(false);
+                  onAddSchool();
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-emerald-400 hover:bg-emerald-500/10 transition-colors cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Tambah sekolah</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {

@@ -76,6 +76,9 @@ export interface SchoolWorkspaceProps {
   onOpenAddSchool: () => void;
   onOpenJoinByCode: () => void;
   onOpenManageSchools: () => void;
+  canCreateSchool?: boolean;
+  isSuperAdmin?: boolean;
+  onOpenUserManagement?: () => void;
   externalRename?: ExternalSchoolRename | null;
 }
 
@@ -101,6 +104,9 @@ export function SchoolWorkspace(props: SchoolWorkspaceProps) {
     onOpenAddSchool,
     onOpenJoinByCode,
     onOpenManageSchools,
+    canCreateSchool = true,
+    isSuperAdmin = false,
+    onOpenUserManagement,
     externalRename
   } = props;
   const [liveRole, setLiveRole] = useState<SchoolRole>(initialRole);
@@ -1124,6 +1130,9 @@ export function SchoolWorkspace(props: SchoolWorkspaceProps) {
           onAddSchool={onOpenAddSchool}
           onJoinByCode={onOpenJoinByCode}
           onManageSchools={onOpenManageSchools}
+          canCreateSchool={canCreateSchool}
+          isSuperAdmin={isSuperAdmin}
+          onOpenUserManagement={onOpenUserManagement}
           onRequestLogout={handleRequestLogout}
         />
 
@@ -1163,6 +1172,9 @@ export function SchoolWorkspace(props: SchoolWorkspaceProps) {
             onAddSchool={onOpenAddSchool}
             onJoinByCode={onOpenJoinByCode}
             onManageSchools={onOpenManageSchools}
+            canCreateSchool={canCreateSchool}
+            isSuperAdmin={isSuperAdmin}
+            onOpenUserManagement={onOpenUserManagement}
             onRequestLogout={handleRequestLogout}
           />
 
