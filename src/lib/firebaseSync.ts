@@ -2,8 +2,12 @@ import {
   doc,
   getDoc,
   setDoc,
+  updateDoc,
+  deleteField,
+  FieldPath,
   onSnapshot,
-  serverTimestamp
+  serverTimestamp,
+  DocumentReference
 } from 'firebase/firestore';
 import { db } from './firebase';
 import {
@@ -90,6 +94,104 @@ export function hasPendingSaves(schoolId?: string): boolean {
     if (entry.schoolId === schoolId) return true;
   }
   return false;
+}
+
+/**
+ * Mengecek apakah channel tertentu pada sekolah aktif sedang menunggu debounce save.
+ */
+export function hasPendingSaveChannel(schoolId: string, channel: string): boolean {
+  if (!schoolId || !channel) return false;
+  return pendingSaves.has(`${schoolId}:${channel}`);
+}
+
+/**
+ * Menghasilkan hash deterministik untuk mendeteksi perubahan data nyata
+ * dan mencegah echo-loop saat pembaruan datang dari onSnapshot.
+ */
+export function computeSyncHash(val: unknown): string {
+  try {
+    return JSON.stringify(sanitizeForFirestore(val === undefined ? null : val));
+  } catch {
+    return String(Date.now());
+  }
+}
+
+export function markSchoolFieldSynced(schoolDocId: string, channel: string, value: unknown): void {
+  if (!isValidSchoolId(schoolDocId)) return;
+  lastSavedHashes.set(`${schoolDocId}:${channel}`, computeSyncHash(value));
+}
+
+export function markMonthSynced(
+  schoolDocId: string,
+  monthIndex: number,
+  archive: MonthlyArchive | null | undefined
+): void {
+  if (!isValidSchoolId(schoolDocId)) return;
+  lastSavedHashes.set(`${schoolDocId}:month:${monthIndex}`, computeSyncHash(archive ?? null));
+}
+
+function isDocNotFoundError(err: any): boolean {
+  const code = String(err?.code || '').toLowerCase();
+  const msg = String(err?.message || '').toLowerCase();
+  return code === 'not-found' || msg.includes('no document to update') || msg.includes('not-found');
+}
+
+async function upsertSchoolFields(
+  schoolDocId: string,
+  fields: Record<string, any>
+): Promise<void> {
+  const docRef = doc(db, 'schools', schoolDocId);
+  const cleanFields = sanitizeForFirestore({
+    ...fields,
+    lastUpdated: serverTimestamp()
+  });
+  try {
+    await updateDoc(docRef, cleanFields);
+  } catch (err: any) {
+    if (isDocNotFoundError(err)) {
+      await setDoc(docRef, { id: schoolDocId, ...cleanFields }, { merge: true });
+    } else {
+      throw err;
+    }
+  }
+}
+
+async function upsertMapEntry(
+  docRef: DocumentReference,
+  schoolDocId: string,
+  mapField: string,
+  entryKey: string,
+  cleanValue: unknown,
+  isDelete: boolean = false
+): Promise<void> {
+  const nowIso = new Date().toISOString();
+  try {
+    await updateDoc(
+      docRef,
+      new FieldPath(mapField, String(entryKey)),
+      isDelete ? deleteField() : cleanValue,
+      new FieldPath('updatedAt'),
+      nowIso,
+      new FieldPath('lastUpdated'),
+      serverTimestamp()
+    );
+  } catch (err: any) {
+    if (isDocNotFoundError(err)) {
+      if (isDelete) return;
+      await setDoc(
+        docRef,
+        sanitizeForFirestore({
+          id: schoolDocId,
+          [mapField]: { [String(entryKey)]: cleanValue },
+          updatedAt: nowIso,
+          lastUpdated: serverTimestamp()
+        }),
+        { merge: true }
+      );
+    } else {
+      throw err;
+    }
+  }
 }
 
 export function isQuotaError(err: any): boolean {
@@ -186,6 +288,176 @@ export function sanitizeForFirestore<T>(val: T): T {
   return cleanObj as any;
 }
 
+function handleSchoolWriteError(err: any, onStatusChange?: (status: CloudSyncStatus) => void): void {
+  if (isQuotaError(err)) {
+    isQuotaExceededGlobal = true;
+    console.warn('Quota harian Firestore terlampaui (Free Tier). Mengalihkan ke mode offline.');
+    if (onStatusChange) onStatusChange('quota_exceeded');
+  } else if (err?.code === 'permission-denied') {
+    console.warn('Firestore sync dilewati karena permission rules:', err.message);
+    if (onStatusChange) onStatusChange('offline');
+  } else if (isOfflineError(err)) {
+    console.warn('Firestore sync ditunda (mode offline):', err?.message || err);
+    if (onStatusChange) onStatusChange('offline');
+  } else {
+    console.error('Gagal sinkronisasi data ke Firebase Firestore:', err);
+    if (onStatusChange) onStatusChange('error');
+  }
+}
+
+/**
+ * Menyimpan SATU field spesifik pada dokumen schools/{schoolDocId} secara debounced + granular
+ * agar pengeditan oleh satu anggota tidak menimpa field lain milik anggota lain.
+ */
+export function debounceSaveSchoolField<K extends 'metadata' | 'students' | 'eskulList'>(
+  schoolDocId: string,
+  field: K,
+  value: SchoolCloudData[K],
+  onStatusChange?: (status: CloudSyncStatus) => void,
+  delay: number = 1000
+): boolean {
+  if (!isValidSchoolId(schoolDocId)) {
+    return rejectInvalidSchoolId('debounceSaveSchoolField', schoolDocId);
+  }
+  if (isQuotaExceededGlobal) {
+    if (onStatusChange) onStatusChange('quota_exceeded');
+    return false;
+  }
+
+  const hashKey = `${schoolDocId}:${field}`;
+  const currentHash = computeSyncHash(value);
+  if (lastSavedHashes.get(hashKey) === currentHash) {
+    if (onStatusChange && !hasPendingSaves(schoolDocId)) onStatusChange('synced');
+    return true;
+  }
+
+  if (onStatusChange) onStatusChange('syncing');
+
+  const pendingKey = `${schoolDocId}:${field}`;
+  const existingPending = pendingSaves.get(pendingKey);
+  if (existingPending) {
+    clearTimeout(existingPending.timer);
+  }
+
+  const flush = async () => {
+    try {
+      const cleanVal = sanitizeForFirestore(value);
+      await upsertSchoolFields(schoolDocId, { [field]: cleanVal });
+      lastSavedHashes.set(hashKey, currentHash);
+      if (onStatusChange && !hasPendingSaves(schoolDocId)) onStatusChange('synced');
+    } catch (err: any) {
+      handleSchoolWriteError(err, onStatusChange);
+    }
+  };
+
+  const timer = setTimeout(async () => {
+    pendingSaves.delete(pendingKey);
+    await flush();
+  }, delay);
+
+  pendingSaves.set(pendingKey, {
+    schoolId: schoolDocId,
+    timer,
+    flush
+  });
+
+  return true;
+}
+
+/**
+ * Menyimpan HANYA bulan-bulan yang berubah pada monthlyStore di schools/{schoolDocId}
+ * menggunakan field path spesifik (monthlyStore.1 .. monthlyStore.12).
+ */
+export function debounceSaveChangedMonthsToFirestore(
+  schoolDocId: string,
+  monthlyStore: Record<number, MonthlyArchive | null>,
+  onStatusChange?: (status: CloudSyncStatus) => void,
+  delay: number = 1200
+): boolean {
+  if (!isValidSchoolId(schoolDocId)) {
+    return rejectInvalidSchoolId('debounceSaveChangedMonthsToFirestore', schoolDocId);
+  }
+  if (isQuotaExceededGlobal) {
+    if (onStatusChange) onStatusChange('quota_exceeded');
+    return false;
+  }
+
+  const changedMonths: Array<{ month: number; hash: string; value: MonthlyArchive | null }> = [];
+  for (let m = 1; m <= 12; m++) {
+    const val = monthlyStore[m] ?? null;
+    const hash = computeSyncHash(val);
+    if (lastSavedHashes.get(`${schoolDocId}:month:${m}`) !== hash) {
+      changedMonths.push({ month: m, hash, value: val });
+    }
+  }
+
+  if (changedMonths.length === 0) {
+    if (onStatusChange && !hasPendingSaves(schoolDocId)) onStatusChange('synced');
+    return true;
+  }
+
+  if (onStatusChange) onStatusChange('syncing');
+
+  const pendingKey = `${schoolDocId}:monthlyStore`;
+  const existingPending = pendingSaves.get(pendingKey);
+  if (existingPending) {
+    clearTimeout(existingPending.timer);
+  }
+
+  const flush = async () => {
+    try {
+      const docRef = doc(db, 'schools', schoolDocId);
+      const args: any[] = [];
+      const fallbackMonthly: Record<string, any> = {};
+
+      for (const item of changedMonths) {
+        const cleanVal = item.value ? sanitizeForFirestore(item.value) : null;
+        args.push(new FieldPath('monthlyStore', String(item.month)), cleanVal);
+        fallbackMonthly[String(item.month)] = cleanVal;
+      }
+      args.push('lastUpdated', serverTimestamp());
+
+      try {
+        await (updateDoc as any)(docRef, ...args);
+      } catch (err: any) {
+        if (isDocNotFoundError(err)) {
+          await setDoc(
+            docRef,
+            sanitizeForFirestore({
+              id: schoolDocId,
+              monthlyStore: fallbackMonthly,
+              lastUpdated: serverTimestamp()
+            }),
+            { merge: true }
+          );
+        } else {
+          throw err;
+        }
+      }
+
+      for (const item of changedMonths) {
+        lastSavedHashes.set(`${schoolDocId}:month:${item.month}`, item.hash);
+      }
+      if (onStatusChange && !hasPendingSaves(schoolDocId)) onStatusChange('synced');
+    } catch (err: any) {
+      handleSchoolWriteError(err, onStatusChange);
+    }
+  };
+
+  const timer = setTimeout(async () => {
+    pendingSaves.delete(pendingKey);
+    await flush();
+  }, delay);
+
+  pendingSaves.set(pendingKey, {
+    schoolId: schoolDocId,
+    timer,
+    flush
+  });
+
+  return true;
+}
+
 export function debounceSaveToFirestore(
   schoolDocId: string,
   data: Partial<SchoolCloudData>,
@@ -195,66 +467,23 @@ export function debounceSaveToFirestore(
     return rejectInvalidSchoolId('debounceSaveToFirestore', schoolDocId);
   }
 
-  if (isQuotaExceededGlobal) {
-    if (onStatusChange) onStatusChange('quota_exceeded');
-    return false;
+  let ok = true;
+  if (data.metadata !== undefined) {
+    ok = debounceSaveSchoolField(schoolDocId, 'metadata', data.metadata, onStatusChange) && ok;
   }
-
-  // Deduplikasi write: Jangan kirim setDoc jika data lokal sama persis dengan yang terakhir disimpan untuk sekolah ini
-  const currentHash = JSON.stringify(data);
-  if (lastSavedHashes.get(schoolDocId) === currentHash) {
-    if (onStatusChange) onStatusChange('synced');
-    return true;
+  if (data.students !== undefined) {
+    ok = debounceSaveSchoolField(schoolDocId, 'students', data.students, onStatusChange) && ok;
   }
-
-  if (onStatusChange) onStatusChange('syncing');
-
-  const pendingKey = `${schoolDocId}:main`;
-  const existingPending = pendingSaves.get(pendingKey);
-  if (existingPending) {
-    clearTimeout(existingPending.timer);
+  if (data.eskulList !== undefined) {
+    ok = debounceSaveSchoolField(schoolDocId, 'eskulList', data.eskulList, onStatusChange) && ok;
   }
-
-  const flush = async () => {
-    try {
-      const docRef = doc(db, 'schools', schoolDocId);
-      const cleanData = sanitizeForFirestore({
-        ...data,
-        lastUpdated: serverTimestamp()
-      });
-      await setDoc(docRef, cleanData, { merge: true });
-      lastSavedHashes.set(schoolDocId, currentHash);
-      if (onStatusChange) onStatusChange('synced');
-    } catch (err: any) {
-      if (isQuotaError(err)) {
-        isQuotaExceededGlobal = true;
-        console.warn('Quota harian Firestore terlampaui (Free Tier). Mengalihkan ke mode offline.');
-        if (onStatusChange) onStatusChange('quota_exceeded');
-      } else if (err?.code === 'permission-denied') {
-        console.warn('Firestore sync dilewati karena permission rules:', err.message);
-        if (onStatusChange) onStatusChange('offline');
-      } else if (isOfflineError(err)) {
-        console.warn('Firestore sync ditunda (mode offline):', err?.message || err);
-        if (onStatusChange) onStatusChange('offline');
-      } else {
-        console.error('Gagal sinkronisasi data ke Firebase Firestore:', err);
-        if (onStatusChange) onStatusChange('error');
-      }
-    }
-  };
-
-  const timer = setTimeout(async () => {
-    pendingSaves.delete(pendingKey);
-    await flush();
-  }, 1500);
-
-  pendingSaves.set(pendingKey, {
-    schoolId: schoolDocId,
-    timer,
-    flush
-  });
-
-  return true;
+  if (data.teachers !== undefined) {
+    ok = debounceSaveTeachersToFirestore(schoolDocId, data.teachers, onStatusChange) && ok;
+  }
+  if (data.monthlyStore !== undefined) {
+    ok = debounceSaveChangedMonthsToFirestore(schoolDocId, data.monthlyStore, onStatusChange) && ok;
+  }
+  return ok;
 }
 
 // Mengambil data lengkap sekolah dari Firestore sekali jalan
@@ -285,7 +514,84 @@ export async function fetchSchoolDataFromCloud(schoolDocId: string): Promise<Sch
   }
 }
 
-// Simpan langsung data logistik bulanan ke Firestore (tanpa debounce)
+// Simpan langsung satu bulan data logistik ke logistik_data/{schoolDocId} (granular per bulan)
+export async function saveLogistikMonthToFirestore(
+  schoolDocId: string,
+  monthIndex: number,
+  monthData: MonthLogistikData,
+  onStatusChange?: (status: CloudSyncStatus) => void
+): Promise<boolean> {
+  if (!isValidSchoolId(schoolDocId)) {
+    return rejectInvalidSchoolId('saveLogistikMonthToFirestore', schoolDocId);
+  }
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    if (onStatusChange) onStatusChange('offline');
+    return false;
+  }
+
+  if (onStatusChange) onStatusChange('syncing');
+  try {
+    const logistikDocRef = doc(db, 'logistik_data', schoolDocId);
+    const cleanMonth = sanitizeForFirestore(monthData);
+    await upsertMapEntry(logistikDocRef, schoolDocId, 'months', String(monthIndex), cleanMonth, false);
+    if (onStatusChange) onStatusChange('synced');
+    return true;
+  } catch (err: any) {
+    if (err?.code === 'permission-denied') {
+      console.warn('Firestore logistik sync dilewati karena permission rules');
+      if (onStatusChange) onStatusChange('offline');
+    } else if (isOfflineError(err)) {
+      console.warn('Firestore logistik sync ditunda (mode offline):', err?.message || err);
+      if (onStatusChange) onStatusChange('offline');
+    } else {
+      console.error('Gagal sinkronisasi data logistik ke Firestore:', err);
+      if (onStatusChange) onStatusChange('error');
+    }
+    return false;
+  }
+}
+
+export function debounceSaveLogistikMonthToFirestore(
+  schoolDocId: string,
+  monthIndex: number,
+  monthData: MonthLogistikData,
+  onStatusChange?: (status: CloudSyncStatus) => void
+): boolean {
+  if (!isValidSchoolId(schoolDocId)) {
+    return rejectInvalidSchoolId('debounceSaveLogistikMonthToFirestore', schoolDocId);
+  }
+
+  if (onStatusChange) onStatusChange('syncing');
+
+  const pendingKey = `${schoolDocId}:logistik_m${monthIndex}`;
+  const existingPending = pendingSaves.get(pendingKey);
+  if (existingPending) {
+    clearTimeout(existingPending.timer);
+  }
+
+  const flush = async () => {
+    try {
+      await saveLogistikMonthToFirestore(schoolDocId, monthIndex, monthData, onStatusChange);
+    } catch {
+      // Handled inside saveLogistikMonthToFirestore
+    }
+  };
+
+  const timer = setTimeout(async () => {
+    pendingSaves.delete(pendingKey);
+    await flush();
+  }, 900);
+
+  pendingSaves.set(pendingKey, {
+    schoolId: schoolDocId,
+    timer,
+    flush
+  });
+
+  return true;
+}
+
+// Simpan langsung seluruh peta logistik ke Firestore (kanonik di logistik_data/{schoolDocId})
 export async function saveLogistikToFirestore(
   schoolDocId: string,
   logistikStore: Record<number, MonthLogistikData>,
@@ -301,7 +607,6 @@ export async function saveLogistikToFirestore(
 
   if (onStatusChange) onStatusChange('syncing');
   try {
-    // 1. Simpan ke koleksi logistik_data/{schoolDocId}
     const logistikDocRef = doc(db, 'logistik_data', schoolDocId);
     const cleanLogistik = sanitizeForFirestore({
       id: schoolDocId,
@@ -310,14 +615,6 @@ export async function saveLogistikToFirestore(
       lastUpdated: serverTimestamp()
     });
     await setDoc(logistikDocRef, cleanLogistik, { merge: true });
-
-    // 2. Sinkronkan juga field logistikStore di schools/{schoolDocId}
-    const schoolDocRef = doc(db, 'schools', schoolDocId);
-    const cleanSchoolLogistik = sanitizeForFirestore({
-      logistikStore,
-      lastUpdated: serverTimestamp()
-    });
-    await setDoc(schoolDocRef, cleanSchoolLogistik, { merge: true });
 
     if (onStatusChange) onStatusChange('synced');
     return true;
@@ -336,7 +633,72 @@ export async function saveLogistikToFirestore(
   }
 }
 
-// Simpan data Kombel ke Firestore
+export function subscribeToLogistikData(
+  schoolDocId: string,
+  onUpdate: (months: Record<number, MonthLogistikData>) => void,
+  onStatusChange?: (status: CloudSyncStatus) => void
+) {
+  if (!isValidSchoolId(schoolDocId)) {
+    return () => {};
+  }
+  const docRef = doc(db, 'logistik_data', schoolDocId);
+  return onSnapshot(
+    docRef,
+    (snap) => {
+      if (snap.metadata.hasPendingWrites) return;
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data && data.months) {
+          onUpdate(data.months as Record<number, MonthLogistikData>);
+        }
+        if (onStatusChange) onStatusChange('synced');
+      }
+    },
+    (error) => {
+      if (isQuotaError(error)) {
+        isQuotaExceededGlobal = true;
+        if (onStatusChange) onStatusChange('quota_exceeded');
+      } else if (isOfflineError(error)) {
+        console.warn('Realtime logistik listener offline:', error.message);
+        if (onStatusChange) onStatusChange('offline');
+      } else {
+        console.warn('Realtime logistik listener error:', error);
+        if (onStatusChange) onStatusChange('error');
+      }
+    }
+  );
+}
+
+// Simpan satu kegiatan Kombel secara granular ke kombel_data/{schoolDocId}
+export async function saveKombelRecordToFirestore(
+  schoolDocId: string,
+  recordKey: string,
+  record: any,
+  onStatusChange?: (status: CloudSyncStatus) => void
+): Promise<boolean> {
+  if (!isValidSchoolId(schoolDocId)) {
+    return rejectInvalidSchoolId('saveKombelRecordToFirestore', schoolDocId);
+  }
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    if (onStatusChange) onStatusChange('offline');
+    return false;
+  }
+
+  if (onStatusChange) onStatusChange('syncing');
+  try {
+    const kombelDocRef = doc(db, 'kombel_data', schoolDocId);
+    const cleanRec = sanitizeForFirestore(record);
+    await upsertMapEntry(kombelDocRef, schoolDocId, 'records', recordKey, cleanRec, false);
+    if (onStatusChange) onStatusChange('synced');
+    return true;
+  } catch (err: any) {
+    console.error('Gagal menyimpan Kombel ke Firestore:', err);
+    if (onStatusChange) onStatusChange('error');
+    return false;
+  }
+}
+
+// Simpan data Kombel ke Firestore (kanonik di kombel_data/{schoolDocId})
 export async function saveKombelToFirestore(
   schoolDocId: string,
   kombelStore: Record<string, any>,
@@ -360,17 +722,6 @@ export async function saveKombelToFirestore(
       lastUpdated: serverTimestamp()
     });
     await setDoc(kombelDocRef, cleanKombel, { merge: true });
-
-    // Cadangkan juga ke schools/{schoolDocId}
-    const schoolDocRef = doc(db, 'schools', schoolDocId);
-    await setDoc(
-      schoolDocRef,
-      sanitizeForFirestore({
-        kombelStore,
-        lastUpdated: serverTimestamp()
-      }),
-      { merge: true }
-    );
 
     if (onStatusChange) onStatusChange('synced');
     return true;
@@ -415,6 +766,7 @@ export function subscribeToKombelData(
   return onSnapshot(
     docRef,
     (snap) => {
+      if (snap.metadata.hasPendingWrites) return;
       if (snap.exists()) {
         const data = snap.data();
         if (data && data.records) {
@@ -522,7 +874,7 @@ export async function fetchLogistikFromFirestore(
   }
 }
 
-// Langganan pembaruan realtime dari Firestore
+// Langganan pembaruan realtime dari Firestore (mengabaikan hasPendingWrites agar tidak echo)
 export function subscribeToSchoolCloudData(
   schoolDocId: string,
   onUpdate: (data: SchoolCloudData) => void,
@@ -535,18 +887,23 @@ export function subscribeToSchoolCloudData(
   return onSnapshot(
     docRef,
     (snap) => {
+      if (snap.metadata.hasPendingWrites) return;
       if (snap.exists()) {
         onUpdate(snap.data() as SchoolCloudData);
         if (onStatusChange) onStatusChange('synced');
       }
     },
     (error) => {
-      if (isOfflineError(error)) {
+      if (isQuotaError(error)) {
+        isQuotaExceededGlobal = true;
+        if (onStatusChange) onStatusChange('quota_exceeded');
+      } else if (isOfflineError(error)) {
         console.warn('Realtime listener Firestore offline:', error.message);
+        if (onStatusChange) onStatusChange('offline');
       } else {
         console.warn('Realtime listener error:', error);
+        if (onStatusChange) onStatusChange('error');
       }
-      if (onStatusChange) onStatusChange('offline');
     }
   );
 }
@@ -563,6 +920,13 @@ export async function saveTeachersToFirestore(
   if (!isValidSchoolId(schoolDocId)) {
     return rejectInvalidSchoolId('saveTeachersToFirestore', schoolDocId);
   }
+  const hashKey = `${schoolDocId}:teachers`;
+  const currentHash = computeSyncHash(teachers || []);
+  if (lastSavedHashes.get(hashKey) === currentHash) {
+    if (onStatusChange && !hasPendingSaves(schoolDocId)) onStatusChange('synced');
+    return true;
+  }
+
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     if (onStatusChange) onStatusChange('offline');
     return false;
@@ -573,7 +937,7 @@ export async function saveTeachersToFirestore(
   try {
     const cleanTeachers = sanitizeForFirestore(teachers || []);
 
-    // 1. Simpan langsung ke koleksi teachers_data/{schoolDocId}
+    // 1. Simpan ke koleksi teachers_data/{schoolDocId}
     const teachersDocRef = doc(db, 'teachers_data', schoolDocId);
     await setDoc(
       teachersDocRef,
@@ -586,18 +950,11 @@ export async function saveTeachersToFirestore(
       { merge: true }
     );
 
-    // 2. Sinkronkan juga field teachers di schools/{schoolDocId}
-    const schoolDocRef = doc(db, 'schools', schoolDocId);
-    await setDoc(
-      schoolDocRef,
-      {
-        teachers: cleanTeachers,
-        lastUpdated: serverTimestamp()
-      },
-      { merge: true }
-    );
+    // 2. Sinkronkan hanya field teachers pada schools/{schoolDocId} (tanpa menimpa field lain)
+    await upsertSchoolFields(schoolDocId, { teachers: cleanTeachers });
 
-    if (onStatusChange) onStatusChange('synced');
+    lastSavedHashes.set(hashKey, currentHash);
+    if (onStatusChange && !hasPendingSaves(schoolDocId)) onStatusChange('synced');
     return true;
   } catch (err: any) {
     if (err?.code === 'permission-denied') {
@@ -621,6 +978,13 @@ export function debounceSaveTeachersToFirestore(
 ): boolean {
   if (!isValidSchoolId(schoolDocId)) {
     return rejectInvalidSchoolId('debounceSaveTeachersToFirestore', schoolDocId);
+  }
+
+  const hashKey = `${schoolDocId}:teachers`;
+  const currentHash = computeSyncHash(teachers || []);
+  if (lastSavedHashes.get(hashKey) === currentHash) {
+    if (onStatusChange && !hasPendingSaves(schoolDocId)) onStatusChange('synced');
+    return true;
   }
 
   if (onStatusChange) onStatusChange('syncing');
@@ -709,6 +1073,7 @@ export function subscribeToTeachersData(
   return onSnapshot(
     docRef,
     (snap) => {
+      if (snap.metadata.hasPendingWrites) return;
       if (snap.exists()) {
         const data = snap.data();
         if (data && Array.isArray(data.teachers)) {
@@ -732,6 +1097,89 @@ export function subscribeToTeachersData(
 // PERBAIKAN SAPRAS LPJ FIREBASE SYNC
 // ==========================================
 
+export async function savePerbaikanMonthToFirestore(
+  schoolDocId: string,
+  monthIndex: number,
+  monthData: MonthPerbaikanData | null,
+  onStatusChange?: (status: CloudSyncStatus) => void
+): Promise<boolean> {
+  if (!isValidSchoolId(schoolDocId)) {
+    return rejectInvalidSchoolId('savePerbaikanMonthToFirestore', schoolDocId);
+  }
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    if (onStatusChange) onStatusChange('offline');
+    return false;
+  }
+
+  if (onStatusChange) onStatusChange('syncing');
+  try {
+    const perbaikanDocRef = doc(db, 'perbaikan_data', schoolDocId);
+    const cleanMonth = monthData ? sanitizeForFirestore(monthData) : null;
+    await upsertMapEntry(
+      perbaikanDocRef,
+      schoolDocId,
+      'months',
+      String(monthIndex),
+      cleanMonth,
+      monthData === null
+    );
+    if (onStatusChange) onStatusChange('synced');
+    return true;
+  } catch (err: any) {
+    if (err?.code === 'permission-denied') {
+      console.warn('Firestore perbaikan sync dilewati karena permission rules');
+      if (onStatusChange) onStatusChange('offline');
+    } else if (isOfflineError(err)) {
+      console.warn('Firestore perbaikan sync ditunda (mode offline):', err?.message || err);
+      if (onStatusChange) onStatusChange('offline');
+    } else {
+      console.error('Gagal sinkronisasi data perbaikan ke Firestore:', err);
+      if (onStatusChange) onStatusChange('error');
+    }
+    return false;
+  }
+}
+
+export function debounceSavePerbaikanMonthToFirestore(
+  schoolDocId: string,
+  monthIndex: number,
+  monthData: MonthPerbaikanData | null,
+  onStatusChange?: (status: CloudSyncStatus) => void
+): boolean {
+  if (!isValidSchoolId(schoolDocId)) {
+    return rejectInvalidSchoolId('debounceSavePerbaikanMonthToFirestore', schoolDocId);
+  }
+
+  if (onStatusChange) onStatusChange('syncing');
+
+  const pendingKey = `${schoolDocId}:perbaikan_m${monthIndex}`;
+  const existingPending = pendingSaves.get(pendingKey);
+  if (existingPending) {
+    clearTimeout(existingPending.timer);
+  }
+
+  const flush = async () => {
+    try {
+      await savePerbaikanMonthToFirestore(schoolDocId, monthIndex, monthData, onStatusChange);
+    } catch {
+      // Handled inside savePerbaikanMonthToFirestore
+    }
+  };
+
+  const timer = setTimeout(async () => {
+    pendingSaves.delete(pendingKey);
+    await flush();
+  }, 1000);
+
+  pendingSaves.set(pendingKey, {
+    schoolId: schoolDocId,
+    timer,
+    flush
+  });
+
+  return true;
+}
+
 export async function savePerbaikanToFirestore(
   schoolDocId: string,
   perbaikanStore: Record<number, MonthPerbaikanData>,
@@ -747,7 +1195,6 @@ export async function savePerbaikanToFirestore(
 
   if (onStatusChange) onStatusChange('syncing');
   try {
-    // 1. Simpan ke koleksi perbaikan_data/{schoolDocId}
     const perbaikanDocRef = doc(db, 'perbaikan_data', schoolDocId);
     const cleanPerbaikan = sanitizeForFirestore({
       id: schoolDocId,
@@ -756,14 +1203,6 @@ export async function savePerbaikanToFirestore(
       lastUpdated: serverTimestamp()
     });
     await setDoc(perbaikanDocRef, cleanPerbaikan, { merge: true });
-
-    // 2. Sinkronkan juga field perbaikanStore di schools/{schoolDocId}
-    const schoolDocRef = doc(db, 'schools', schoolDocId);
-    const cleanSchoolPerbaikan = sanitizeForFirestore({
-      perbaikanStore,
-      lastUpdated: serverTimestamp()
-    });
-    await setDoc(schoolDocRef, cleanSchoolPerbaikan, { merge: true });
 
     if (onStatusChange) onStatusChange('synced');
     return true;
@@ -877,6 +1316,7 @@ export function subscribeToPerbaikanData(
   return onSnapshot(
     docRef,
     (snap) => {
+      if (snap.metadata.hasPendingWrites) return;
       if (snap.exists()) {
         const data = snap.data();
         if (data && data.months) {
@@ -899,6 +1339,93 @@ export function subscribeToPerbaikanData(
 // ==========================================
 // ESKUL LPJ, HONOR & PRESENSI SYNC
 // ==========================================
+
+export async function saveEskulRecordToFirestore(
+  schoolDocId: string,
+  recordKey: string,
+  record: MonthEskulRecord,
+  masterSiswaEskul?: Record<string, EskulAnggota[]>,
+  onStatusChange?: (status: CloudSyncStatus) => void
+): Promise<boolean> {
+  if (!isValidSchoolId(schoolDocId)) {
+    return rejectInvalidSchoolId('saveEskulRecordToFirestore', schoolDocId);
+  }
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    if (onStatusChange) onStatusChange('offline');
+    return false;
+  }
+
+  try {
+    if (onStatusChange) onStatusChange('syncing');
+    const eskulDocRef = doc(db, 'eskul_data', schoolDocId);
+    const cleanRecord = sanitizeForFirestore(record);
+    await upsertMapEntry(eskulDocRef, schoolDocId, 'records', recordKey, cleanRecord, false);
+
+    if (masterSiswaEskul) {
+      const cleanMaster = sanitizeForFirestore(masterSiswaEskul);
+      await setDoc(
+        eskulDocRef,
+        {
+          masterSiswaEskul: cleanMaster,
+          updatedAt: new Date().toISOString(),
+          lastServerSync: serverTimestamp()
+        },
+        { merge: true }
+      );
+    }
+
+    if (onStatusChange) onStatusChange('synced');
+    return true;
+  } catch (err: any) {
+    if (err?.code === 'permission-denied') {
+      console.warn('Firestore eskul save dilewati karena permission rules atau offline');
+      if (onStatusChange) onStatusChange('synced');
+    } else if (isOfflineError(err)) {
+      console.warn('Firestore eskul save ditunda (mode offline):', err?.message || err);
+      if (onStatusChange) onStatusChange('offline');
+    } else {
+      console.error('Error menyimpan data eskul ke Firestore:', err);
+      if (onStatusChange) onStatusChange('error');
+    }
+    return false;
+  }
+}
+
+export async function saveEskulMasterSiswaToFirestore(
+  schoolDocId: string,
+  masterSiswaEskul: Record<string, EskulAnggota[]>,
+  onStatusChange?: (status: CloudSyncStatus) => void
+): Promise<boolean> {
+  if (!isValidSchoolId(schoolDocId)) {
+    return rejectInvalidSchoolId('saveEskulMasterSiswaToFirestore', schoolDocId);
+  }
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    if (onStatusChange) onStatusChange('offline');
+    return false;
+  }
+
+  try {
+    if (onStatusChange) onStatusChange('syncing');
+    const eskulDocRef = doc(db, 'eskul_data', schoolDocId);
+    const cleanMaster = sanitizeForFirestore(masterSiswaEskul || {});
+    await setDoc(
+      eskulDocRef,
+      {
+        id: schoolDocId,
+        masterSiswaEskul: cleanMaster,
+        updatedAt: new Date().toISOString(),
+        lastServerSync: serverTimestamp()
+      },
+      { merge: true }
+    );
+    if (onStatusChange) onStatusChange('synced');
+    return true;
+  } catch (err: any) {
+    console.warn('Gagal menyimpan master siswa eskul:', err);
+    if (onStatusChange) onStatusChange('error');
+    return false;
+  }
+}
 
 export async function saveEskulToFirestore(
   schoolDocId: string,
@@ -930,18 +1457,6 @@ export async function saveEskulToFirestore(
 
     const eskulDocRef = doc(db, 'eskul_data', schoolDocId);
     await setDoc(eskulDocRef, eskulPayload, { merge: true });
-
-    // Cermin ke schools/{schoolDocId} untuk integrasi cadangan
-    const schoolDocRef = doc(db, 'schools', schoolDocId);
-    await setDoc(
-      schoolDocRef,
-      {
-        eskulStore: cleanRecords,
-        masterSiswaEskul: cleanMasterSiswa,
-        lastUpdated: serverTimestamp()
-      },
-      { merge: true }
-    );
 
     if (onStatusChange) onStatusChange('synced');
     return true;
@@ -1067,6 +1582,7 @@ export function subscribeToEskulData(
   return onSnapshot(
     docRef,
     (snap) => {
+      if (snap.metadata.hasPendingWrites) return;
       if (snap.exists()) {
         const data = snap.data();
         if (data && data.records) {
@@ -1191,9 +1707,11 @@ export function subscribeToSchoolMetadata(
   return onSnapshot(
     docRef,
     (snap) => {
+      if (snap.metadata.hasPendingWrites) return;
       if (snap.exists()) {
         const data = snap.data();
         if (data && data.metadata) {
+          markSchoolFieldSynced(schoolDocId, 'metadata', data.metadata);
           lastSavedHashes.set(`${schoolDocId}_meta`, JSON.stringify(data.metadata));
           onUpdate(data.metadata as SchoolMetadata);
         }
@@ -1266,6 +1784,19 @@ export async function saveAllMasterDataToFirestore(
     // 1. Simpan ke koleksi utama schools/{schoolDocId}
     const schoolDocRef = doc(db, 'schools', schoolDocId);
     await setDoc(schoolDocRef, updateObj, { merge: true });
+
+    if (payload.metadata) {
+      markSchoolFieldSynced(schoolDocId, 'metadata', payload.metadata);
+    }
+    if (payload.teachers) {
+      markSchoolFieldSynced(schoolDocId, 'teachers', payload.teachers);
+    }
+    if (payload.students) {
+      markSchoolFieldSynced(schoolDocId, 'students', payload.students);
+    }
+    if (payload.eskulList) {
+      markSchoolFieldSynced(schoolDocId, 'eskulList', payload.eskulList);
+    }
 
     // 2. Simpan juga ke sub-koleksi spesifik agar kompatibel dengan listener tiap tab
     if (payload.teachers && payload.teachers.length > 0) {

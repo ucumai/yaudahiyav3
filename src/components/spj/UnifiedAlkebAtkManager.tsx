@@ -19,9 +19,12 @@ import {
 } from '../../types';
 import { DokumenTripartitGuru, DokumenGuruData, DEFAULT_PRINT_SETTINGS } from './DokumenTripartitGuru';
 import {
-  debounceSaveLogistikToFirestore,
+  debounceSaveLogistikMonthToFirestore,
   fetchLogistikFromFirestore,
-  saveLogistikToFirestore,
+  saveLogistikMonthToFirestore,
+  subscribeToLogistikData,
+  computeSyncHash,
+  hasPendingSaveChannel,
   CloudSyncStatus,
   isOfflineError
 } from '../../lib/firebaseSync';
@@ -497,6 +500,7 @@ export const UnifiedAlkebAtkManager: React.FC<UnifiedAlkebAtkManagerProps> = ({
   const printSettingsRef = useRef<PrintPreviewSettings>(printSettings);
   const currentMonthRef = useRef<number>(currentMonthIndex);
   const lastBkuMonthRef = useRef<number>(currentMonthIndex);
+  const isCloudReadyRef = useRef<boolean>(false);
 
   useEffect(() => {
     monthlyStoreRef.current = monthlyLogistikStore;
@@ -550,11 +554,11 @@ export const UnifiedAlkebAtkManager: React.FC<UnifiedAlkebAtkManagerProps> = ({
     writeLS(schoolId, 'monthly_logistik_store', newStore);
     removeLS(schoolId, 'managed_barang_list');
 
-    // Simpan ke Firestore
+    // Simpan ke Firestore (granular hanya untuk bulan aktif)
     if (immediateCloudSave) {
       try {
         setCloudSyncStatus('syncing');
-        await saveLogistikToFirestore(schoolId, newStore);
+        await saveLogistikMonthToFirestore(schoolId, activeMonth, updatedMonthData);
         setCloudSyncStatus('synced');
         setLastSyncedAt(new Date().toLocaleTimeString('id-ID'));
       } catch (err) {
@@ -567,70 +571,125 @@ export const UnifiedAlkebAtkManager: React.FC<UnifiedAlkebAtkManagerProps> = ({
         }
       }
     } else {
-      debounceSaveLogistikToFirestore(schoolId, newStore, (st) => {
+      debounceSaveLogistikMonthToFirestore(schoolId, activeMonth, updatedMonthData, (st) => {
         setCloudSyncStatus(st);
         if (st === 'synced') setLastSyncedAt(new Date().toLocaleTimeString('id-ID'));
       });
     }
   };
 
-  // Muat data dari Firestore Cloud saat pertama kali komponen dimount atau saat schoolId berganti
+  // Muat data dari Firestore Cloud + berlangganan realtime saat komponen dimount atau saat schoolId berganti
   useEffect(() => {
     let isMounted = true;
+    isCloudReadyRef.current = false;
     setCloudSyncStatus('syncing');
+
+    const monthContentHash = (m?: MonthLogistikData | null) =>
+      m
+        ? computeSyncHash({
+            barangList: m.barangList || [],
+            config: m.config || null,
+            printSettings: m.printSettings || null
+          })
+        : '';
+
+    const applyCloudMonths = (cloudData: Record<number, MonthLogistikData>, isInitial: boolean) => {
+      if (!isMounted || !cloudData || typeof cloudData !== 'object') return;
+
+      const merged: Record<number, MonthLogistikData> = { ...monthlyStoreRef.current };
+      let anyChanged = false;
+      let activeMonthChanged = false;
+      const activeMonth = currentMonthRef.current;
+
+      Object.keys(cloudData).forEach((mKey) => {
+        const numKey = Number(mKey);
+        if (!Number.isFinite(numKey)) return;
+        if (hasPendingSaveChannel(schoolId, `logistik_m${numKey}`)) return;
+
+        const remoteMonth = cloudData[numKey];
+        if (!remoteMonth) return;
+
+        const localMonth = merged[numKey];
+        const remoteHash = monthContentHash(remoteMonth);
+        const localHash = monthContentHash(localMonth);
+
+        const shouldApply = isInitial
+          ? !localMonth || new Date(remoteMonth.updatedAt || 0) >= new Date(localMonth.updatedAt || 0)
+          : remoteHash !== localHash;
+
+        if (shouldApply) {
+          merged[numKey] = remoteMonth;
+          anyChanged = true;
+          if (numKey === activeMonth) {
+            activeMonthChanged = true;
+          }
+        }
+      });
+
+      if (anyChanged) {
+        monthlyStoreRef.current = merged;
+        setMonthlyLogistikStore(merged);
+        writeLS(schoolId, 'monthly_logistik_store', merged);
+
+        if (activeMonthChanged) {
+          const activeCloudMonth = merged[activeMonth];
+          if (activeCloudMonth) {
+            if (Array.isArray(activeCloudMonth.barangList)) {
+              setBarangList(activeCloudMonth.barangList);
+              barangListRef.current = activeCloudMonth.barangList;
+            }
+            if (activeCloudMonth.config) {
+              setConfig(activeCloudMonth.config);
+              configRef.current = activeCloudMonth.config;
+            }
+            if (activeCloudMonth.printSettings) {
+              setPrintSettings(activeCloudMonth.printSettings);
+              printSettingsRef.current = activeCloudMonth.printSettings;
+            }
+          }
+        }
+      }
+    };
 
     fetchLogistikFromFirestore(schoolId)
       .then((cloudData) => {
-        if (!isMounted || !cloudData) {
-          setCloudSyncStatus('synced');
-          return;
+        if (!isMounted) return;
+        if (cloudData) {
+          applyCloudMonths(cloudData, true);
         }
-
-        const merged: Record<number, MonthLogistikData> = { ...monthlyStoreRef.current };
-        if (cloudData && typeof cloudData === 'object') {
-          Object.keys(cloudData).forEach((mKey) => {
-            const numKey = Number(mKey);
-            if (!merged[numKey] || new Date(cloudData[numKey]?.updatedAt || 0) >= new Date(merged[numKey]?.updatedAt || 0)) {
-              merged[numKey] = cloudData[numKey];
-            }
-          });
-        }
-
-        monthlyStoreRef.current = merged;
-        setMonthlyLogistikStore(merged);
-
-        // Sinkronkan ke bulan aktif saat ini jika ada data di cloud
-        const activeCloudMonth = merged[currentMonthIndex];
-        if (activeCloudMonth && activeCloudMonth.barangList && activeCloudMonth.barangList.length > 0) {
-          setBarangList(activeCloudMonth.barangList);
-          barangListRef.current = activeCloudMonth.barangList;
-          if (activeCloudMonth.config) {
-            setConfig(activeCloudMonth.config);
-            configRef.current = activeCloudMonth.config;
-          }
-          if (activeCloudMonth.printSettings) {
-            setPrintSettings(activeCloudMonth.printSettings);
-            printSettingsRef.current = activeCloudMonth.printSettings;
-          }
-        }
-
-        writeLS(schoolId, 'monthly_logistik_store', merged);
-
+        isCloudReadyRef.current = true;
         setCloudSyncStatus('synced');
         setLastSyncedAt(new Date().toLocaleTimeString('id-ID'));
       })
       .catch((err) => {
         console.warn('Error fetching cloud logistik:', err);
-        setCloudSyncStatus('synced');
+        if (isMounted) {
+          isCloudReadyRef.current = true;
+          setCloudSyncStatus('synced');
+        }
       });
+
+    const unsubscribe = subscribeToLogistikData(
+      schoolId,
+      (remoteMonths) => {
+        if (!isMounted) return;
+        applyCloudMonths(remoteMonths, false);
+        setCloudSyncStatus('synced');
+        setLastSyncedAt(new Date().toLocaleTimeString('id-ID'));
+      },
+      (st) => {
+        if (isMounted) setCloudSyncStatus(st);
+      }
+    );
 
     return () => {
       isMounted = false;
+      unsubscribe();
     };
   }, [schoolId]);
 
-  // Efek Perpindahan Bulan: Menjamin data distribusi bulan sebelumnya tersimpan aman,
-  // dan memuat data distribusi bulan baru yang sesuai tanpa menimpa jatah yang sudah dikelola
+  // Efek Perpindahan Bulan: Menjamin data distribusi bulan sebelumnya tersimpan hanya jika memang berubah,
+  // dan memuat data distribusi bulan baru tanpa menimpa data anggota tim lain.
   const prevMonthRef = useRef<number>(currentMonthIndex);
 
   useEffect(() => {
@@ -641,28 +700,42 @@ export const UnifiedAlkebAtkManager: React.FC<UnifiedAlkebAtkManagerProps> = ({
       lastBkuMonthRef.current = currentMonthIndex;
 
       let updatedStore = monthlyStoreRef.current;
-      if (!readOnly) {
-        // 1. Simpan data bulan sebelumnya yang aktif secara UTUH ke store & Firestore
-        const prevData: MonthLogistikData = {
-          monthIndex: prevMonth,
-          barangList: barangListRef.current,
-          config: configRef.current,
-          printSettings: printSettingsRef.current,
-          updatedAt: new Date().toISOString()
-        };
+      if (!readOnly && isCloudReadyRef.current) {
+        const existingPrev = monthlyStoreRef.current[prevMonth];
+        const prevContentChanged =
+          !existingPrev ||
+          computeSyncHash({
+            barangList: existingPrev.barangList || [],
+            config: existingPrev.config || null,
+            printSettings: existingPrev.printSettings || null
+          }) !==
+            computeSyncHash({
+              barangList: barangListRef.current || [],
+              config: configRef.current || null,
+              printSettings: printSettingsRef.current || null
+            });
 
-        updatedStore = {
-          ...monthlyStoreRef.current,
-          [prevMonth]: prevData
-        };
-        monthlyStoreRef.current = updatedStore;
-        setMonthlyLogistikStore(updatedStore);
-        writeLS(schoolId, 'monthly_logistik_store', updatedStore);
+        if (prevContentChanged || hasPendingSaveChannel(schoolId, `logistik_m${prevMonth}`)) {
+          const prevData: MonthLogistikData = {
+            monthIndex: prevMonth,
+            barangList: barangListRef.current,
+            config: configRef.current,
+            printSettings: printSettingsRef.current,
+            updatedAt: new Date().toISOString()
+          };
 
-        // Simpan langsung ke cloud database agar tidak hilang saat berpindah bulan
-        saveLogistikToFirestore(schoolId, updatedStore).catch((e) =>
-          console.warn('Sync prev month failed:', e)
-        );
+          updatedStore = {
+            ...monthlyStoreRef.current,
+            [prevMonth]: prevData
+          };
+          monthlyStoreRef.current = updatedStore;
+          setMonthlyLogistikStore(updatedStore);
+          writeLS(schoolId, 'monthly_logistik_store', updatedStore);
+
+          saveLogistikMonthToFirestore(schoolId, prevMonth, prevData).catch((e) =>
+            console.warn('Sync prev month failed:', e)
+          );
+        }
       }
 
       // 2. Muat data bulan yang baru dipilih dari updatedStore atau LocalStorage
@@ -701,7 +774,7 @@ export const UnifiedAlkebAtkManager: React.FC<UnifiedAlkebAtkManagerProps> = ({
         setBarangList(initialDist);
         barangListRef.current = initialDist;
 
-        if (!readOnly) {
+        if (!readOnly && isCloudReadyRef.current) {
           // Simpan inisialisasi awal ke store bulan ini agar saat berpindah lagi tidak hilang
           const newMonthData: MonthLogistikData = {
             monthIndex: currentMonthIndex,
@@ -717,7 +790,7 @@ export const UnifiedAlkebAtkManager: React.FC<UnifiedAlkebAtkManagerProps> = ({
           monthlyStoreRef.current = storeWithNew;
           setMonthlyLogistikStore(storeWithNew);
           writeLS(schoolId, 'monthly_logistik_store', storeWithNew);
-          saveLogistikToFirestore(schoolId, storeWithNew).catch((e) =>
+          saveLogistikMonthToFirestore(schoolId, currentMonthIndex, newMonthData).catch((e) =>
             console.warn('Save initial new month failed:', e)
           );
         }
@@ -726,7 +799,7 @@ export const UnifiedAlkebAtkManager: React.FC<UnifiedAlkebAtkManagerProps> = ({
   }, [currentMonthIndex]);
 
   // Reaktif cerdas terhadap perubahan transaksi BKU untuk bulan yang sedang aktif:
-  // - Hanya berjalan jika bulan TIDAK sedang berganti
+  // - Hanya berjalan jika bulan TIDAK sedang berganti dan initial cloud fetch sudah selesai
   // - Jika BKU kosong (data BKU dihapus), kosongkan list
   // - Jika ada item baru di BKU yang belum ada di daftar logistik, tambahkan tanpa merusak jatah yang sudah dikelola
   useEffect(() => {
@@ -739,7 +812,7 @@ export const UnifiedAlkebAtkManager: React.FC<UnifiedAlkebAtkManagerProps> = ({
     if (extractedFromBku.length === 0) {
       if (barangListRef.current.length > 0) {
         setBarangList([]);
-        if (!readOnly) {
+        if (!readOnly && isCloudReadyRef.current) {
           persistLogistikState([], configRef.current, printSettingsRef.current, true);
         }
       }
@@ -756,7 +829,7 @@ export const UnifiedAlkebAtkManager: React.FC<UnifiedAlkebAtkManagerProps> = ({
       }
       const initialDist = smartAutoDistributeHelper(extractedFromBku, personnelList);
       setBarangList(initialDist);
-      if (!readOnly) {
+      if (!readOnly && isCloudReadyRef.current) {
         persistLogistikState(initialDist, configRef.current, printSettingsRef.current, true);
       }
       return;
@@ -815,7 +888,7 @@ export const UnifiedAlkebAtkManager: React.FC<UnifiedAlkebAtkManagerProps> = ({
       [currentMonthIndex]: currentMonthData
     };
     try {
-      await saveLogistikToFirestore(schoolId, currentStore);
+      await saveLogistikMonthToFirestore(schoolId, currentMonthIndex, currentMonthData);
       monthlyStoreRef.current = currentStore;
       setMonthlyLogistikStore(currentStore);
       setCloudSyncStatus('synced');

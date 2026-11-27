@@ -25,9 +25,11 @@ import { getPramukaAgendaByMonth } from '../master/PramukaProgramTahunanDocument
 import { generateWeeklyMateriFromProta, generateWeeklyMateriForAnyEskul } from '../../utils/pramukaProtaIntegration';
 import { findEskulProtaProfile } from '../../data/eskulProtaDataBank';
 import {
-  saveEskulToFirestore,
+  saveEskulRecordToFirestore,
+  saveEskulMasterSiswaToFirestore,
   fetchEskulFromFirestore,
   subscribeToEskulData,
+  computeSyncHash,
   CloudSyncStatus
 } from '../../lib/firebaseSync';
 import { useSchool } from '../../context/SchoolContext';
@@ -1700,6 +1702,20 @@ export const EskulLpjView: React.FC<EskulLpjViewProps> = ({
     return generateCleanRecord(currentMonthIndex, currentEskul);
   });
 
+  const currentRecordKeyRef = useRef<string>(currentRecordKey);
+  const eskulStoreRef = useRef<Record<string, MonthEskulRecord>>(eskulStore);
+  const activeRecordRef = useRef<MonthEskulRecord>(activeRecord);
+
+  useEffect(() => {
+    currentRecordKeyRef.current = currentRecordKey;
+  }, [currentRecordKey]);
+  useEffect(() => {
+    eskulStoreRef.current = eskulStore;
+  }, [eskulStore]);
+  useEffect(() => {
+    activeRecordRef.current = activeRecord;
+  }, [activeRecord]);
+
   // Teks Pendahuluan Terpadu Khusus Pramuka SD (Siaga & Penggalang)
   const pendahuluanText = useMemo(() => {
     if (isPramukaEskul) {
@@ -1708,24 +1724,40 @@ export const EskulLpjView: React.FC<EskulLpjViewProps> = ({
     return activeRecord?.programConfig?.latarBelakang || '';
   }, [isPramukaEskul, metadata.namaSekolah, metadata.tahunAnggaran, currentMonthIndex, activeRecord?.programConfig?.latarBelakang]);
 
-  // Helper to fetch from Firestore on mount (async-unmount-safe)
+  // Helper to fetch from Firestore on mount & subscribe realtime (async-unmount-safe)
   useEffect(() => {
     let isCancelled = false;
     let unsubscribe: (() => void) | undefined;
+
+    const applyRemoteEskulPayload = (payload: {
+      records?: Record<string, MonthEskulRecord>;
+      masterSiswaEskul?: Record<string, EskulAnggota[]>;
+    }) => {
+      if (isCancelled || !payload) return;
+      if (payload.records) {
+        const merged = { ...eskulStoreRef.current, ...payload.records };
+        eskulStoreRef.current = merged;
+        setEskulStore(merged);
+        writeLS(schoolId, 'eskul_store', merged);
+
+        const activeKey = currentRecordKeyRef.current;
+        const remoteActive = payload.records[activeKey];
+        if (remoteActive && computeSyncHash(remoteActive) !== computeSyncHash(activeRecordRef.current)) {
+          activeRecordRef.current = remoteActive;
+          setActiveRecord(remoteActive);
+        }
+      }
+      if (payload.masterSiswaEskul) {
+        setMasterSiswaEskulMap(payload.masterSiswaEskul);
+      }
+    };
 
     async function loadCloudData() {
       try {
         const cloudData = await fetchEskulFromFirestore(schoolId);
         if (isCancelled) return;
-        if (cloudData && cloudData.records) {
-          setEskulStore((prev) => {
-            const merged = { ...prev, ...cloudData.records };
-            writeLS(schoolId, 'eskul_store', merged);
-            return merged;
-          });
-          if (cloudData.masterSiswaEskul) {
-            setMasterSiswaEskulMap(cloudData.masterSiswaEskul);
-          }
+        if (cloudData) {
+          applyRemoteEskulPayload(cloudData);
         }
       } catch (err) {
         console.warn('Error fetching eskul data:', err);
@@ -1736,13 +1768,7 @@ export const EskulLpjView: React.FC<EskulLpjViewProps> = ({
       unsubscribe = subscribeToEskulData(
         schoolId,
         (payload) => {
-          if (isCancelled) return;
-          if (payload && payload.records) {
-            setEskulStore((prev) => ({ ...prev, ...payload.records }));
-            if (payload.masterSiswaEskul) {
-              setMasterSiswaEskulMap(payload.masterSiswaEskul);
-            }
-          }
+          applyRemoteEskulPayload(payload);
         },
         (status) => {
           if (!isCancelled) setCloudSyncStatus(status);
@@ -1838,7 +1864,7 @@ export const EskulLpjView: React.FC<EskulLpjViewProps> = ({
 
       writeLS(schoolId, 'eskul_store', newStore);
 
-      await saveEskulToFirestore(schoolId, newStore, masterSiswaEskulMap, (status) =>
+      await saveEskulRecordToFirestore(schoolId, currentRecordKey, updatedRecord, masterSiswaEskulMap, (status) =>
         setCloudSyncStatus(status)
       );
     } catch (error) {
@@ -1871,7 +1897,7 @@ export const EskulLpjView: React.FC<EskulLpjViewProps> = ({
 
     writeLS(schoolId, 'eskul_store', newStore);
 
-    await saveEskulToFirestore(schoolId, newStore, masterSiswaEskulMap, (status) =>
+    await saveEskulRecordToFirestore(schoolId, currentRecordKey, updatedRecord, masterSiswaEskulMap, (status) =>
       setCloudSyncStatus(status)
     );
   };
@@ -1986,7 +2012,7 @@ export const EskulLpjView: React.FC<EskulLpjViewProps> = ({
 
         // Auto sync updated student roster to Firebase
         if (!readOnly) {
-          saveEskulToFirestore(schoolId, eskulStore, updatedMasterMap);
+          saveEskulMasterSiswaToFirestore(schoolId, updatedMasterMap);
         }
 
         alert(`Berhasil mengimpor ${newPresensiSiswa.length} data siswa untuk eskul ${currentEskul.namaEskul}!`);

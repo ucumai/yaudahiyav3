@@ -10,10 +10,12 @@ import {
   PerbaikanKegiatanItem
 } from '../../types';
 import {
-  savePerbaikanToFirestore,
-  debounceSavePerbaikanToFirestore,
+  savePerbaikanMonthToFirestore,
+  debounceSavePerbaikanMonthToFirestore,
   fetchPerbaikanFromFirestore,
   subscribeToPerbaikanData,
+  computeSyncHash,
+  hasPendingSaveChannel,
   CloudSyncStatus
 } from '../../lib/firebaseSync';
 import { useSchool } from '../../context/SchoolContext';
@@ -245,6 +247,20 @@ export const PerbaikanSaprasView: React.FC<PerbaikanSaprasViewProps> = ({
   const [isSubmittingCloud, setIsSubmittingCloud] = useState<boolean>(false);
   const isMonthSwitchingRef = useRef<boolean>(false);
   const initialMountLoadedRef = useRef<boolean>(false);
+  const isApplyingRemoteRef = useRef<boolean>(false);
+  const selectedMonthRef = useRef<number>(selectedMonthIndex);
+  const perbaikanStoreRef = useRef<Record<number, MonthPerbaikanData>>(perbaikanStore);
+  const activeMonthDataRef = useRef<TransaksiBKU[]>(activeMonthData);
+
+  useEffect(() => {
+    selectedMonthRef.current = selectedMonthIndex;
+  }, [selectedMonthIndex]);
+  useEffect(() => {
+    perbaikanStoreRef.current = perbaikanStore;
+  }, [perbaikanStore]);
+  useEffect(() => {
+    activeMonthDataRef.current = activeMonthData;
+  }, [activeMonthData]);
 
   // Default Config generator for clean month initialization (No stall data)
   const getDefaultConfig = (monthIdx: number): PerbaikanSaprasConfig => {
@@ -468,12 +484,42 @@ export const PerbaikanSaprasView: React.FC<PerbaikanSaprasViewProps> = ({
     const unsubscribe = subscribeToPerbaikanData(
       schoolId,
       (remoteMonths) => {
-        if (isMounted && remoteMonths) {
-          setPerbaikanStore((prev) => {
-            const merged = { ...prev, ...remoteMonths };
-            writeLS(schoolId, 'perbaikan_store_v2', merged);
-            return merged;
-          });
+        if (!isMounted || !remoteMonths) return;
+
+        const prevStore = perbaikanStoreRef.current;
+        const activeMonth = selectedMonthRef.current;
+        const nextStore: Record<number, MonthPerbaikanData> = { ...remoteMonths };
+
+        // Pertahankan bulan lokal yang sedang menunggu debounce write agar ketikan lokal tidak hilang
+        for (let m = 1; m <= 12; m++) {
+          if (hasPendingSaveChannel(schoolId, `perbaikan_m${m}`) && prevStore[m]) {
+            nextStore[m] = prevStore[m];
+          }
+        }
+
+        perbaikanStoreRef.current = nextStore;
+        setPerbaikanStore(nextStore);
+        writeLS(schoolId, 'perbaikan_store_v2', nextStore);
+
+        if (!hasPendingSaveChannel(schoolId, `perbaikan_m${activeMonth}`)) {
+          const prevActive = prevStore[activeMonth];
+          const nextActive = nextStore[activeMonth];
+          if (computeSyncHash(prevActive || null) !== computeSyncHash(nextActive || null)) {
+            isApplyingRemoteRef.current = true;
+            const { list, activeId } = getInitialKegiatanForMonth(
+              activeMonth,
+              nextActive,
+              activeMonthDataRef.current
+            );
+            setKegiatanList(list);
+            setActiveKegiatanId(activeId);
+            const activeKeg = list.find((k) => k.id === activeId) || list[0];
+            if (activeKeg?.config) setConfig(activeKeg.config);
+            if (activeKeg?.rabItems) setRabItems(activeKeg.rabItems);
+            setTimeout(() => {
+              isApplyingRemoteRef.current = false;
+            }, 50);
+          }
         }
       },
       (status) => {
@@ -617,7 +663,7 @@ export const PerbaikanSaprasView: React.FC<PerbaikanSaprasViewProps> = ({
     writeLS(schoolId, 'perbaikan_store_v2', newStore);
 
     try {
-      await savePerbaikanToFirestore(schoolId, newStore, setCloudSyncStatus);
+      await savePerbaikanMonthToFirestore(schoolId, selectedMonthIndex, mData, setCloudSyncStatus);
       setAiSuccessMessage(
         `LPJ Perbaikan (${latestKegiatanList.length} kegiatan) Bulan ${currentMonthName} ${currentYear} berhasil disubmit dan tersimpan permanen di Cloud Firebase!`
       );
@@ -643,14 +689,14 @@ export const PerbaikanSaprasView: React.FC<PerbaikanSaprasViewProps> = ({
     delete newStore[selectedMonthIndex];
     setPerbaikanStore(newStore);
     writeLS(schoolId, 'perbaikan_store_v2', newStore);
-    await savePerbaikanToFirestore(schoolId, newStore, setCloudSyncStatus);
+    await savePerbaikanMonthToFirestore(schoolId, selectedMonthIndex, null, setCloudSyncStatus);
     setAiSuccessMessage(`Bulan ${currentMonthName} kembali ke status draf.`);
     setTimeout(() => setAiSuccessMessage(null), 3500);
   };
 
   // Auto-sync updates to Firebase if this month is already submitted
   useEffect(() => {
-    if (readOnly || isMonthSwitchingRef.current) return;
+    if (readOnly || isMonthSwitchingRef.current || isApplyingRemoteRef.current) return;
     if (perbaikanStore[selectedMonthIndex]?.isSubmitted) {
       const totalVal = rabItems.reduce((acc, curr) => acc + (curr.jumlah || 0), 0);
       const currentListWithLatest = kegiatanList.map((k) =>
@@ -678,7 +724,7 @@ export const PerbaikanSaprasView: React.FC<PerbaikanSaprasViewProps> = ({
       };
       setPerbaikanStore(newStore);
       writeLS(schoolId, 'perbaikan_store_v2', newStore);
-      debounceSavePerbaikanToFirestore(schoolId, newStore, setCloudSyncStatus);
+      debounceSavePerbaikanMonthToFirestore(schoolId, selectedMonthIndex, updatedMonthData, setCloudSyncStatus);
     }
   }, [config, rabItems]);
 

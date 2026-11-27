@@ -30,7 +30,7 @@ import {
 } from './utils/monthArchiveUtils';
 import { ensureTransactionsClassification } from './utils/klasifikasiSpjHelper';
 import { AlertCircle, CheckCircle2, Loader2, LogOut, RefreshCw, ShieldAlert } from 'lucide-react';
-import { testFirestoreConnection, initAuth, googleSignIn, logoutGoogle } from './lib/firebase';
+import { testFirestoreConnection, initAuth, connectGoogleDrive, logoutGoogle } from './lib/firebase';
 import { User } from 'firebase/auth';
 import { SchoolContext } from './context/SchoolContext';
 import { readLS, writeLS, removeLS, hasSchoolLocalCache, clearAllBospStorage } from './lib/schoolStorage';
@@ -54,10 +54,21 @@ import {
 } from './lib/googleDriveSync';
 import {
   CloudSyncStatus,
+  SchoolCloudData,
+  computeSyncHash,
   debounceSaveToFirestore,
+  debounceSaveSchoolField,
+  debounceSaveChangedMonthsToFirestore,
+  debounceSaveTeachersToFirestore,
   fetchSchoolDataFromCloud,
+  fetchTeachersFromFirestore,
   flushPendingSaves,
-  hasPendingSaves
+  hasPendingSaves,
+  hasPendingSaveChannel,
+  markMonthSynced,
+  markSchoolFieldSynced,
+  subscribeToSchoolCloudData,
+  subscribeToTeachersData
 } from './lib/firebaseSync';
 
 export interface ExternalSchoolRename {
@@ -204,6 +215,33 @@ export function SchoolWorkspace(props: SchoolWorkspaceProps) {
     namaSekolah: (activeSummary?.namaSekolah || metadata.namaSekolah || '').trim(),
     npsn: (activeSummary?.npsn || metadata.npsn || '').trim()
   });
+
+  // Live refs agar realtime onSnapshot listener dapat membandingkan perubahan tanpa stale closure
+  const activeMonthIndexRef = useRef<number>(activeMonthIndex);
+  const metadataRef = useRef<SchoolMetadata>(metadata);
+  const teachersRef = useRef<MasterGuru[]>(teachers);
+  const studentsRef = useRef<MasterSiswa[]>(students);
+  const eskulListRef = useRef<MasterEskul[]>(eskulList);
+  const monthlyStoreRef = useRef<Record<number, MonthlyArchive | null>>(monthlyStore);
+
+  useEffect(() => {
+    activeMonthIndexRef.current = activeMonthIndex;
+  }, [activeMonthIndex]);
+  useEffect(() => {
+    metadataRef.current = metadata;
+  }, [metadata]);
+  useEffect(() => {
+    teachersRef.current = teachers;
+  }, [teachers]);
+  useEffect(() => {
+    studentsRef.current = students;
+  }, [students]);
+  useEffect(() => {
+    eskulListRef.current = eskulList;
+  }, [eskulList]);
+  useEffect(() => {
+    monthlyStoreRef.current = monthlyStore;
+  }, [monthlyStore]);
 
   // Opsi 3: Google Drive Pribadi Sekolah Synchronization State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -402,12 +440,12 @@ export function SchoolWorkspace(props: SchoolWorkspaceProps) {
     readOnly
   ]);
 
-  // Handler Login Akun Google Sekolah (Pengguna baru atau re-koneksi manual)
+  // Handler Login Akun Google Drive Sekolah (Pengguna baru atau re-koneksi manual)
   const handleDriveLogin = async () => {
     setIsDriveSyncing(true);
     setDriveRealtimeStatus('syncing');
     try {
-      const res = await googleSignIn();
+      const res = await connectGoogleDrive();
       if (res) {
         setCurrentUser(res.user);
         setAccessToken(res.accessToken);
@@ -582,7 +620,7 @@ export function SchoolWorkspace(props: SchoolWorkspaceProps) {
     }
   };
 
-  // 1. Initial Cloud Boot: Baca Firestore untuk schoolId aktif
+  // 1. Initial Cloud Boot + Realtime Collaboration Listener (onSnapshot) untuk schoolId aktif
   useEffect(() => {
     if (!user) {
       setIsInitialCloudLoaded(false);
@@ -590,6 +628,112 @@ export function SchoolWorkspace(props: SchoolWorkspaceProps) {
     }
 
     let isMounted = true;
+    let unsubscribeSchool: (() => void) | null = null;
+    let unsubscribeTeachers: (() => void) | null = null;
+
+    const handleCloudStatus = (st: CloudSyncStatus) => {
+      if (!isMounted) return;
+      setSyncStatus(st);
+      if (st === 'synced') setLastSyncedTime(new Date());
+    };
+
+    const applyRemoteTeachers = (incomingTeachers: MasterGuru[]) => {
+      if (!isMounted || hasPendingSaveChannel(schoolId, 'teachers')) return;
+      const cleanT = sanitizeTeachers(incomingTeachers);
+      if (computeSyncHash(cleanT) !== computeSyncHash(teachersRef.current)) {
+        markSchoolFieldSynced(schoolId, 'teachers', cleanT);
+        teachersRef.current = cleanT;
+        setTeachers(cleanT);
+      }
+    };
+
+    const applyCloudSnapshot = (cloudData: SchoolCloudData, isInitialLoad: boolean) => {
+      if (!isMounted || !cloudData) return;
+
+      if (cloudData.metadata && !hasPendingSaveChannel(schoolId, 'metadata')) {
+        const nextMeta: SchoolMetadata = {
+          ...defaultMetadata,
+          ...cloudData.metadata,
+          namaSekolah: cloudData.metadata.namaSekolah ?? defaultMetadata.namaSekolah,
+          npsn: cloudData.metadata.npsn ?? defaultMetadata.npsn,
+          logoUrl: cloudData.metadata.logoUrl ?? defaultMetadata.logoUrl
+        };
+        const loadedName = (nextMeta.namaSekolah || '').trim();
+        const loadedNpsn = (nextMeta.npsn || '').trim();
+        lastRegistryIdentityRef.current = {
+          namaSekolah: loadedName,
+          npsn: loadedNpsn
+        };
+        if (isInitialLoad || computeSyncHash(nextMeta) !== computeSyncHash(metadataRef.current)) {
+          markSchoolFieldSynced(schoolId, 'metadata', nextMeta);
+          metadataRef.current = nextMeta;
+          setMetadata(nextMeta);
+        }
+      }
+
+      if (Array.isArray(cloudData.teachers)) {
+        if (isInitialLoad) {
+          const cleanT = sanitizeTeachers(cloudData.teachers);
+          markSchoolFieldSynced(schoolId, 'teachers', cleanT);
+          teachersRef.current = cleanT;
+          setTeachers(cleanT);
+        } else {
+          applyRemoteTeachers(cloudData.teachers);
+        }
+      }
+
+      if (Array.isArray(cloudData.students) && !hasPendingSaveChannel(schoolId, 'students')) {
+        if (isInitialLoad || computeSyncHash(cloudData.students) !== computeSyncHash(studentsRef.current)) {
+          markSchoolFieldSynced(schoolId, 'students', cloudData.students);
+          studentsRef.current = cloudData.students;
+          setStudents(cloudData.students);
+        }
+      }
+
+      if (Array.isArray(cloudData.eskulList) && !hasPendingSaveChannel(schoolId, 'eskulList')) {
+        if (isInitialLoad || computeSyncHash(cloudData.eskulList) !== computeSyncHash(eskulListRef.current)) {
+          markSchoolFieldSynced(schoolId, 'eskulList', cloudData.eskulList);
+          eskulListRef.current = cloudData.eskulList;
+          setEskulList(cloudData.eskulList);
+        }
+      }
+
+      if (cloudData.monthlyStore && typeof cloudData.monthlyStore === 'object' && !hasPendingSaveChannel(schoolId, 'monthlyStore')) {
+        const nextStore: Record<number, MonthlyArchive | null> = isInitialLoad
+          ? { ...EMPTY_MONTHLY_STORE, ...cloudData.monthlyStore }
+          : { ...monthlyStoreRef.current };
+
+        let anyMonthChanged = isInitialLoad;
+        let activeMonthChanged = false;
+        const currentMonth = activeMonthIndexRef.current;
+
+        for (let m = 1; m <= 12; m++) {
+          const remoteVal = cloudData.monthlyStore[m] ?? null;
+          const localVal = monthlyStoreRef.current[m] ?? null;
+          if (isInitialLoad || computeSyncHash(remoteVal) !== computeSyncHash(localVal)) {
+            markMonthSynced(schoolId, m, remoteVal);
+            nextStore[m] = remoteVal;
+            anyMonthChanged = true;
+            if (m === currentMonth) {
+              activeMonthChanged = true;
+            }
+          }
+        }
+
+        if (anyMonthChanged) {
+          monthlyStoreRef.current = nextStore;
+          setMonthlyStore(nextStore);
+          if (isInitialLoad || activeMonthChanged) {
+            const activeArchive = nextStore[currentMonth];
+            if (activeArchive?.data && Array.isArray(activeArchive.data)) {
+              setData(ensureTransactionsClassification(activeArchive.data));
+            } else if (activeMonthChanged) {
+              setData([]);
+            }
+          }
+        }
+      }
+    };
 
     async function initCloudSync() {
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
@@ -611,43 +755,32 @@ export function SchoolWorkspace(props: SchoolWorkspaceProps) {
       }
 
       try {
-        const cloudData = await fetchSchoolDataFromCloud(schoolId);
+        const [cloudData, cloudTeachers] = await Promise.all([
+          fetchSchoolDataFromCloud(schoolId),
+          fetchTeachersFromFirestore(schoolId)
+        ]);
         if (!isMounted) return;
 
+        const mergedInitialCloud: SchoolCloudData | null = cloudData
+          ? {
+              ...cloudData,
+              teachers: Array.isArray(cloudTeachers) ? cloudTeachers : cloudData.teachers
+            }
+          : Array.isArray(cloudTeachers)
+            ? { teachers: cloudTeachers }
+            : null;
+
         const hasAnyCloudData = Boolean(
-          cloudData && (cloudData.teachers || cloudData.metadata || cloudData.monthlyStore)
+          mergedInitialCloud &&
+            (mergedInitialCloud.teachers ||
+              mergedInitialCloud.students ||
+              mergedInitialCloud.eskulList ||
+              mergedInitialCloud.metadata ||
+              mergedInitialCloud.monthlyStore)
         );
 
-        if (hasAnyCloudData && cloudData) {
-          if (cloudData.metadata) {
-            const loadedName = (cloudData.metadata.namaSekolah ?? activeSummary?.namaSekolah ?? '').trim();
-            const loadedNpsn = (cloudData.metadata.npsn ?? activeSummary?.npsn ?? '').trim();
-            lastRegistryIdentityRef.current = {
-              namaSekolah: loadedName,
-              npsn: loadedNpsn
-            };
-            setMetadata((prev) => ({ ...prev, ...cloudData.metadata }));
-          }
-          if (Array.isArray(cloudData.teachers)) {
-            setTeachers(sanitizeTeachers(cloudData.teachers));
-          }
-          if (Array.isArray(cloudData.students)) {
-            setStudents(cloudData.students);
-          }
-          if (Array.isArray(cloudData.eskulList)) {
-            setEskulList(cloudData.eskulList);
-          }
-          const targetMonth = cloudData.activeMonthIndex || activeMonthIndex;
-          if (cloudData.monthlyStore && typeof cloudData.monthlyStore === 'object') {
-            setMonthlyStore({ ...EMPTY_MONTHLY_STORE, ...cloudData.monthlyStore });
-            const activeArchive = cloudData.monthlyStore[targetMonth];
-            if (activeArchive?.data && Array.isArray(activeArchive.data)) {
-              setData(ensureTransactionsClassification(activeArchive.data));
-            }
-          }
-          if (cloudData.activeMonthIndex) {
-            setActiveMonthIndex(cloudData.activeMonthIndex);
-          }
+        if (hasAnyCloudData && mergedInitialCloud) {
+          applyCloudSnapshot(mergedInitialCloud, true);
           setSyncStatus('synced');
           setLastSyncedTime(new Date());
         }
@@ -656,26 +789,42 @@ export function SchoolWorkspace(props: SchoolWorkspaceProps) {
         // - bukan readOnly (viewer)
         // - sekolah ini memang punya cache lokal
         // - dan dokumen cloud belum memiliki monthlyStore maupun teachers
-        if (!readOnly && hasSchoolLocalCache(schoolId) && !cloudData?.monthlyStore && !cloudData?.teachers) {
+        if (!readOnly && hasSchoolLocalCache(schoolId) && !mergedInitialCloud?.monthlyStore && !mergedInitialCloud?.teachers) {
           debounceSaveToFirestore(
             schoolId,
             {
-              metadata,
-              teachers,
-              students,
-              eskulList,
-              monthlyStore,
-              activeMonthIndex
+              metadata: metadataRef.current,
+              teachers: teachersRef.current,
+              students: studentsRef.current,
+              eskulList: eskulListRef.current,
+              monthlyStore: monthlyStoreRef.current
             },
-            (st) => {
-              if (isMounted) {
-                setSyncStatus(st);
-                if (st === 'synced') setLastSyncedTime(new Date());
-              }
-            }
+            handleCloudStatus
           );
         } else if (!hasAnyCloudData) {
           setSyncStatus('synced');
+        }
+
+        // Pasang listener realtime untuk dokumen sekolah dan teachers_data
+        if (!unsubscribeSchool) {
+          unsubscribeSchool = subscribeToSchoolCloudData(
+            schoolId,
+            (remoteData) => {
+              applyCloudSnapshot(remoteData, false);
+              if (isMounted) setLastSyncedTime(new Date());
+            },
+            handleCloudStatus
+          );
+        }
+        if (!unsubscribeTeachers) {
+          unsubscribeTeachers = subscribeToTeachersData(
+            schoolId,
+            (remoteTeachers) => {
+              applyRemoteTeachers(remoteTeachers);
+              if (isMounted) setLastSyncedTime(new Date());
+            },
+            handleCloudStatus
+          );
         }
       } catch (err) {
         console.warn('Initial cloud sync error:', err);
@@ -699,6 +848,8 @@ export function SchoolWorkspace(props: SchoolWorkspaceProps) {
 
     return () => {
       isMounted = false;
+      if (unsubscribeSchool) unsubscribeSchool();
+      if (unsubscribeTeachers) unsubscribeTeachers();
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
@@ -733,26 +884,46 @@ export function SchoolWorkspace(props: SchoolWorkspaceProps) {
     writeLS(schoolId, 'master_eskul', eskulList);
   }, [schoolId, eskulList]);
 
-  // 3. Sinkronkan otomatis ke Cloud Firestore setiap kali ada perubahan data (dilewati saat readOnly)
+  // 3. Sinkronkan otomatis ke Cloud Firestore secara granular per bagian (dilewati saat readOnly)
   useEffect(() => {
     if (!user || !isInitialCloudLoaded || readOnly) return;
+    debounceSaveSchoolField(schoolId, 'metadata', metadata, (st) => {
+      setSyncStatus(st);
+      if (st === 'synced') setLastSyncedTime(new Date());
+    });
+  }, [metadata, isInitialCloudLoaded, user, schoolId, readOnly]);
 
-    debounceSaveToFirestore(
-      schoolId,
-      {
-        metadata,
-        teachers,
-        students,
-        eskulList,
-        monthlyStore,
-        activeMonthIndex
-      },
-      (st) => {
-        setSyncStatus(st);
-        if (st === 'synced') setLastSyncedTime(new Date());
-      }
-    );
-  }, [metadata, teachers, students, eskulList, monthlyStore, activeMonthIndex, isInitialCloudLoaded, user, schoolId, readOnly]);
+  useEffect(() => {
+    if (!user || !isInitialCloudLoaded || readOnly) return;
+    debounceSaveSchoolField(schoolId, 'students', students, (st) => {
+      setSyncStatus(st);
+      if (st === 'synced') setLastSyncedTime(new Date());
+    });
+  }, [students, isInitialCloudLoaded, user, schoolId, readOnly]);
+
+  useEffect(() => {
+    if (!user || !isInitialCloudLoaded || readOnly) return;
+    debounceSaveSchoolField(schoolId, 'eskulList', eskulList, (st) => {
+      setSyncStatus(st);
+      if (st === 'synced') setLastSyncedTime(new Date());
+    });
+  }, [eskulList, isInitialCloudLoaded, user, schoolId, readOnly]);
+
+  useEffect(() => {
+    if (!user || !isInitialCloudLoaded || readOnly) return;
+    debounceSaveTeachersToFirestore(schoolId, teachers, (st) => {
+      setSyncStatus(st);
+      if (st === 'synced') setLastSyncedTime(new Date());
+    });
+  }, [teachers, isInitialCloudLoaded, user, schoolId, readOnly]);
+
+  useEffect(() => {
+    if (!user || !isInitialCloudLoaded || readOnly) return;
+    debounceSaveChangedMonthsToFirestore(schoolId, monthlyStore, (st) => {
+      setSyncStatus(st);
+      if (st === 'synced') setLastSyncedTime(new Date());
+    });
+  }, [monthlyStore, isInitialCloudLoaded, user, schoolId, readOnly]);
 
   // 4. Sinkronkan perubahan nama sekolah / NPSN ke ringkasan mySchools (debounce 1.5s)
   useEffect(() => {
@@ -955,6 +1126,10 @@ export function SchoolWorkspace(props: SchoolWorkspaceProps) {
   const handleDeleteAll = () => {
     if (readOnly) return;
     setData([]);
+    setMonthlyStore((prev) => ({
+      ...prev,
+      [activeMonthIndex]: null
+    }));
     setExpandedRows({});
     removeLS(schoolId, 'managed_barang_list');
   };

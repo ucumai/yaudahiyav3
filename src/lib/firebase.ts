@@ -25,9 +25,12 @@ export const db = getFirestore(
 // Inisialisasi Firebase Authentication
 export const auth = getAuth(app);
 
-// Konfigurasi Google Auth Provider dengan Scope Drive.file (Opsi 3: Database Google Drive Pribadi Sekolah)
-const googleProvider = new GoogleAuthProvider();
-googleProvider.addScope('https://www.googleapis.com/auth/drive.file');
+// Provider login dasar (tanpa scope Drive sensitif agar login tidak memicu verifikasi OAuth Google)
+const googleBasicProvider = new GoogleAuthProvider();
+
+// Provider khusus integrasi Google Drive (diminta terpisah hanya saat user menghubungkan Drive)
+const googleDriveProvider = new GoogleAuthProvider();
+googleDriveProvider.addScope('https://www.googleapis.com/auth/drive.file');
 
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;
@@ -99,18 +102,35 @@ export const initAuth = (
   });
 };
 
-// Login dengan akun Google sekolah
-export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
+// Login dasar aplikasi dengan akun Google (hanya profil & email untuk Firebase Auth + Firestore)
+export const googleSignIn = async (): Promise<{ user: User; accessToken: string | null } | null> => {
   try {
     isSigningIn = true;
-    const result = await signInWithPopup(auth, googleProvider);
+    const result = await signInWithPopup(auth, googleBasicProvider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    const token = credential?.accessToken || null;
+
+    // Tidak menyentuh cachedAccessToken Drive kecuali memang terhubung via connectGoogleDrive
+    return { user: result.user, accessToken: token };
+  } catch (error: any) {
+    console.error('Sign in Google error:', error);
+    throw error;
+  } finally {
+    isSigningIn = false;
+  }
+};
+
+// Koneksi khusus Google Drive (meminta izin drive.file hanya saat user klik Hubungkan/Sambungkan Drive)
+export const connectGoogleDrive = async (): Promise<{ user: User; accessToken: string } | null> => {
+  try {
+    isSigningIn = true;
+    const result = await signInWithPopup(auth, googleDriveProvider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (!credential?.accessToken) {
       throw new Error('Gagal mendapatkan token otorisasi Google Drive');
     }
 
     cachedAccessToken = credential.accessToken;
-    // Simpan tanda pengguna terhubung
     try {
       localStorage.setItem('bosp_gdrive_has_connected', 'true');
       if (result.user.email) localStorage.setItem('bosp_gdrive_user_email', result.user.email);
@@ -119,7 +139,7 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
 
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
-    console.error('Sign in Google error:', error);
+    console.error('Connect Google Drive error:', error);
     throw error;
   } finally {
     isSigningIn = false;

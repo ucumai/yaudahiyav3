@@ -4,8 +4,10 @@ import { MONTH_NAMES_ID } from '../../utils/monthArchiveUtils';
 import { KopSuratResmi } from '../common/KopSuratResmi';
 import { extractSpatialDataFromPDF } from '../../utils/pdfPrecisionParser';
 import {
-  saveKombelToFirestore,
+  saveKombelRecordToFirestore,
   fetchKombelFromFirestore,
+  subscribeToKombelData,
+  computeSyncHash,
   CloudSyncStatus
 } from '../../lib/firebaseSync';
 import { useSchool } from '../../context/SchoolContext';
@@ -335,6 +337,17 @@ export const KonsumsiLpjView: React.FC<KonsumsiLpjViewProps> = ({
   } | null>(null);
 
   const getStorageKey = (id: string) => (id === 'manual' ? `manual_m${activeMonthIndex}` : id);
+  const currentKombelKey = getStorageKey(selectedTxId);
+  const currentKombelKeyRef = useRef<string>(currentKombelKey);
+  const kombelStoreRef = useRef<Record<string, KombelDocRecord>>(kombelStore);
+  const applyRecordToFormRef = useRef<(rec: KombelDocRecord) => void>(() => {});
+
+  useEffect(() => {
+    currentKombelKeyRef.current = currentKombelKey;
+  }, [currentKombelKey]);
+  useEffect(() => {
+    kombelStoreRef.current = kombelStore;
+  }, [kombelStore]);
 
   const createBlankKombelState = (id: string, tx?: TransaksiBKU): KombelDocRecord => {
     const mm = String(activeMonthIndex).padStart(2, '0');
@@ -502,29 +515,79 @@ export const KonsumsiLpjView: React.FC<KonsumsiLpjViewProps> = ({
     setMateriStatus(null);
   };
 
-  // Sync with Cloud Firestore on mount or schoolDocId change
+  useEffect(() => {
+    applyRecordToFormRef.current = applyRecordToForm;
+  });
+
+  // Sync with Cloud Firestore on mount & realtime updates
   useEffect(() => {
     let isCancelled = false;
+
+    const applyRemoteKombelRecords = (cloudData: Record<string, any>, isInitial: boolean) => {
+      if (isCancelled || !cloudData || typeof cloudData !== 'object') return;
+      const prevStore = kombelStoreRef.current;
+      const activeKey = currentKombelKeyRef.current;
+      const prevActiveRec = prevStore[activeKey];
+      const merged = { ...prevStore };
+      let anyChanged = false;
+
+      Object.entries(cloudData).forEach(([k, val]) => {
+        if (!val || typeof val !== 'object') return;
+        const normalized = { ...val, status: 'synced', isFilled: true } as KombelDocRecord;
+        if (computeSyncHash(prevStore[k] || null) !== computeSyncHash(normalized)) {
+          merged[k] = normalized;
+          anyChanged = true;
+        }
+      });
+
+      if (anyChanged) {
+        kombelStoreRef.current = merged;
+        setKombelStore(merged);
+        writeLS(schoolId, 'kombel_store_v2', merged);
+
+        const nextActiveRec = merged[activeKey];
+        if (
+          nextActiveRec &&
+          computeSyncHash(prevActiveRec || null) !== computeSyncHash(nextActiveRec)
+        ) {
+          applyRecordToFormRef.current(nextActiveRec);
+          if (!isInitial) {
+            setKombelSaveFeedback({
+              type: 'synced',
+              message: 'Data Kombel diperbarui realtime dari cloud.'
+            });
+            setTimeout(() => {
+              setKombelSaveFeedback((prev) =>
+                prev?.message === 'Data Kombel diperbarui realtime dari cloud.' ? null : prev
+              );
+            }, 3000);
+          }
+        }
+      }
+    };
+
     const fetchCloud = async () => {
       try {
         const cloudData = await fetchKombelFromFirestore(schoolId);
         if (cloudData && Object.keys(cloudData).length > 0 && !isCancelled) {
-          setKombelStore((prev) => {
-            const merged = { ...prev };
-            Object.entries(cloudData).forEach(([k, val]) => {
-              merged[k] = { ...val, status: 'synced', isFilled: true };
-            });
-            writeLS(schoolId, 'kombel_store_v2', merged);
-            return merged;
-          });
+          applyRemoteKombelRecords(cloudData, true);
         }
       } catch (err) {
         console.warn('Error loading cloud kombel records:', err);
       }
     };
     fetchCloud();
+
+    const unsubscribe = subscribeToKombelData(
+      schoolId,
+      (remoteRecords) => {
+        applyRemoteKombelRecords(remoteRecords, false);
+      }
+    );
+
     return () => {
       isCancelled = true;
+      unsubscribe();
     };
   }, [schoolId]);
 
@@ -625,7 +688,7 @@ export const KonsumsiLpjView: React.FC<KonsumsiLpjViewProps> = ({
     });
 
     try {
-      const success = await saveKombelToFirestore(schoolId, updated);
+      const success = await saveKombelRecordToFirestore(schoolId, key, currentRec);
       if (success) {
         setKombelSaveFeedback({
           type: 'synced',

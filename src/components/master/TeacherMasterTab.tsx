@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { MasterGuru, SchoolMetadata } from '../../types';
 import {
   Users,
@@ -23,8 +23,6 @@ import {
 } from 'lucide-react';
 import {
   saveTeachersToFirestore,
-  fetchTeachersFromFirestore,
-  subscribeToTeachersData,
   CloudSyncStatus
 } from '../../lib/firebaseSync';
 import { useSchool } from '../../context/SchoolContext';
@@ -53,40 +51,6 @@ export const TeacherMasterTab: React.FC<TeacherMasterTabProps> = ({
   const [teacherToDelete, setTeacherToDelete] = useState<MasterGuru | null>(null);
   const [cloudStatus, setCloudStatus] = useState<CloudSyncStatus>('synced');
   const [isCloudSyncing, setIsCloudSyncing] = useState<boolean>(false);
-
-  // Real-time synchronization from Firebase Firestore
-  useEffect(() => {
-    setIsCloudSyncing(true);
-
-    const unsubscribe = subscribeToTeachersData(
-      schoolId,
-      (cloudTeachers) => {
-        if (Array.isArray(cloudTeachers)) {
-          onUpdateTeachers(cloudTeachers);
-        }
-        setIsCloudSyncing(false);
-      },
-      (st) => setCloudStatus(st)
-    );
-
-    // Initial load from Firebase Firestore
-    fetchTeachersFromFirestore(schoolId)
-      .then((cloudTeachers) => {
-        if (Array.isArray(cloudTeachers)) {
-          onUpdateTeachers(cloudTeachers);
-        }
-      })
-      .catch((err) => {
-        console.warn('Initial fetch teachers from Firestore error:', err);
-      })
-      .finally(() => {
-        setIsCloudSyncing(false);
-      });
-
-    return () => {
-      if (unsubscribe) unsubscribe();
-    };
-  }, [schoolId]);
 
   // Form State for Add / Edit
   const [formData, setFormData] = useState<Partial<MasterGuru>>({
